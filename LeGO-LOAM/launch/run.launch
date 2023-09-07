@@ -1,15 +1,8 @@
 <launch>
     
-    <!--- Sim Time -->
-    <param name="/use_sim_time" value="true" />
-    <node pkg="rosbag" type="play" name="bag_play" args="/home/pqf/data/lidar_0714_circle.bag --clock -d 5" />
-
-    <include file="$(find rs_to_velodyne)/launch/convert.launch" />
-
     <!--- TF -->
     <node pkg="tf" type="static_transform_publisher" name="camera_init_to_map"  args="0 0 0 1.570795   0        1.570795 map    camera_init 10" />
     <node pkg="tf" type="static_transform_publisher" name="base_link_to_camera" args="0 0 0 -1.570795 -1.570795 0        camera base_link   10" />
-    <node pkg="tf" type="static_transform_publisher" name="base_link_to_lidar" args="0.5 0 0.35 0 0 0        base_link rslidar   10" />
 
     <!--- LeGO-LOAM -->    
     <node pkg="lego_loam" type="imageProjection"    name="imageProjection"    output="screen"/>
