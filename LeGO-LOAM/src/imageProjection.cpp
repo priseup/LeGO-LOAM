@@ -1,516 +1,431 @@
-// Copyright 2013, Ji Zhang, Carnegie Mellon University
-// Further contributions copyright (c) 2016, Southwest Research Institute
-// All rights reserved.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
-//
-// 1. Redistributions of source code must retain the above copyright notice,
-//    this list of conditions and the following disclaimer.
-// 2. Redistributions in binary form must reproduce the above copyright notice,
-//    this list of conditions and the following disclaimer in the documentation
-//    and/or other materials provided with the distribution.
-// 3. Neither the name of the copyright holder nor the names of its
-//    contributors may be used to endorse or promote products derived from this
-//    software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
-//
-// This is an implementation of the algorithm described in the following papers:
-//   J. Zhang and S. Singh. LOAM: Lidar Odometry and Mapping in Real-time.
-//     Robotics: Science and Systems Conference (RSS). Berkeley, CA, July 2014.
-//   T. Shan and B. Englot. LeGO-LOAM: Lightweight and Ground-Optimized Lidar Odometry and Mapping on Variable Terrain
-//      IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS). October 2018.
-
 #include "utility.h"
+#include "imageProjection.h"
 
-class ImageProjection{
-private:
+static int index_in_project_cloud(int row, int col) {
+    return row * Horizon_SCAN + col;
+}
 
-    ros::NodeHandle nh;
+ImageProjection::ImageProjection(): nh_("~") {
+    sub_laser_cloud_ = nh_.subscribe<sensor_msgs::PointCloud2>(pointCloudTopic, 1, &ImageProjection::cloud_handler, this);
 
-    ros::Subscriber subLaserCloud;
-    
-    ros::Publisher pubFullCloud;
-    ros::Publisher pubFullInfoCloud;
+    pub_projected_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/full_cloud_projected", 1);
+    pub_projected_cloud_with_intensity_ = nh_.advertise<sensor_msgs::PointCloud2> ("/full_cloud_info", 1);
 
-    ros::Publisher pubGroundCloud;
-    ros::Publisher pubSegmentedCloud;
-    ros::Publisher pubSegmentedCloudPure;
-    ros::Publisher pubSegmentedCloudInfo;
-    ros::Publisher pubOutlierCloud;
+    pub_ground_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/ground_cloud", 1);
+    pub_segmented_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud", 1);
+    pub_pure_segmented_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud_pure", 1);
+    pub_segmented_cloud_info_ = nh_.advertise<cloud_msgs::cloud_info> ("/segmented_cloud_info", 1);
+    pub_outlier_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/outlier_cloud", 1);
 
-    pcl::PointCloud<PointType>::Ptr laserCloudIn;
-    pcl::PointCloud<PointXYZIR>::Ptr laserCloudInRing;
+    init_point_value_.x = std::numeric_limits<float>::quiet_NaN();
+    init_point_value_.y = std::numeric_limits<float>::quiet_NaN();
+    init_point_value_.z = std::numeric_limits<float>::quiet_NaN();
+    init_point_value_.intensity = -1;
 
-    pcl::PointCloud<PointType>::Ptr fullCloud; // projected velodyne raw cloud, but saved in the form of 1-D matrix
-    pcl::PointCloud<PointType>::Ptr fullInfoCloud; // same as fullCloud, but with intensity - range
+    neighbors_[0] = std::make_pair(-1, 0);
+    neighbors_[1] = std::make_pair(1, 0);
+    neighbors_[2] = std::make_pair(0, 1);
+    neighbors_[3] = std::make_pair(0, -1);
 
-    pcl::PointCloud<PointType>::Ptr groundCloud;
-    pcl::PointCloud<PointType>::Ptr segmentedCloud;
-    pcl::PointCloud<PointType>::Ptr segmentedCloudPure;
-    pcl::PointCloud<PointType>::Ptr outlierCloud;
+    allocate_memory();
+    reset_parameters();
+}
 
-    PointType nanPoint; // fill in fullCloud at each iteration
+void ImageProjection::allocate_memory() {
+    const int points_num = N_SCAN*Horizon_SCAN;
 
-    cv::Mat rangeMat; // range matrix for range image
-    cv::Mat labelMat; // label matrix for segmentaiton marking
-    cv::Mat groundMat; // ground matrix for ground cloud marking
-    int labelCount;
+    laser_cloud_input_.reset(new pcl::PointCloud<PointType>);
 
-    float startOrientation;
-    float endOrientation;
+    projected_laser_cloud_.reset(new pcl::PointCloud<PointType>);
+    projected_laser_cloud_->points.assign(init_point_value_, points_num);
 
-    cloud_msgs::cloud_info segMsg; // info of segmented cloud
-    std_msgs::Header cloudHeader;
+    projected_laser_cloud_with_intensity_.reset(new pcl::PointCloud<PointType>);
+    projected_laser_cloud_with_intensity_->points.assign(init_point_value_, points_num);
 
-    std::vector<std::pair<int8_t, int8_t> > neighborIterator; // neighbor iterator for segmentaiton process
+    projected_ground_cloud_.reset(new pcl::PointCloud<PointType>);
+    projected_ground_segment_cloud_.reset(new pcl::PointCloud<PointType>);
+    projected_pure_segmented_cloud_.reset(new pcl::PointCloud<PointType>);
+    projected_outlier_cloud_.reset(new pcl::PointCloud<PointType>);
 
-    uint16_t *allPushedIndX; // array for tracking points of a segmented object
-    uint16_t *allPushedIndY;
+    segmented_cloud_msg_.ring_index_start.assign(N_SCAN, 0);
+    segmented_cloud_msg_.ring_index_end.assign(N_SCAN, 0);
 
-    uint16_t *queueIndX; // array for breadth-first search process of segmentation, for speed
-    uint16_t *queueIndY;
+    segmented_cloud_msg_.ground_segment_flag.assign(points_num, false);
+    segmented_cloud_msg_.ground_segment_cloud_column.assign(points_num, 0);
+    segmented_cloud_msg_.ground_segment_cloud_range.assign(points_num, 0);
 
-public:
-    ImageProjection():
-        nh("~"){
+    point_label_.assign(points_num, ImageProjection::PointLabel::invalid);
+}
 
-        subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>(pointCloudTopic, 1, &ImageProjection::cloudHandler, this);
+void ImageProjection::reset_parameters() {
+    laser_cloud_input_->clear();
+    projected_ground_cloud_->clear();
+    projected_ground_segment_cloud_->clear();
+    projected_pure_segmented_cloud_->clear();
+    projected_outlier_cloud_->clear();
 
-        pubFullCloud = nh.advertise<sensor_msgs::PointCloud2> ("/full_cloud_projected", 1);
-        pubFullInfoCloud = nh.advertise<sensor_msgs::PointCloud2> ("/full_cloud_info", 1);
+    projected_cloud_range_ = cv::Mat(N_SCAN, Horizon_SCAN, CV_32F, cv::Scalar::all(FLT_MAX));
+    projected_cloud_ground_flag_ = cv::Mat(N_SCAN, Horizon_SCAN, CV_8S, cv::Scalar::all(0));
+    projected_cloud_label_ = cv::Mat(N_SCAN, Horizon_SCAN, CV_32S, cv::Scalar::all(0));
+}
 
-        pubGroundCloud = nh.advertise<sensor_msgs::PointCloud2> ("/ground_cloud", 1);
-        pubSegmentedCloud = nh.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud", 1);
-        pubSegmentedCloudPure = nh.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud_pure", 1);
-        pubSegmentedCloudInfo = nh.advertise<cloud_msgs::cloud_info> ("/segmented_cloud_info", 1);
-        pubOutlierCloud = nh.advertise<sensor_msgs::PointCloud2> ("/outlier_cloud", 1);
+~ImageProjection() {
+    std::cout << "test for destructor of ImageProjection" << std::endl;
+}
 
-        nanPoint.x = std::numeric_limits<float>::quiet_NaN();
-        nanPoint.y = std::numeric_limits<float>::quiet_NaN();
-        nanPoint.z = std::numeric_limits<float>::quiet_NaN();
-        nanPoint.intensity = -1;
+void ImageProjection::copy_point_cloud(const sensor_msgs::PointCloud2ConstPtr& laser_cloud) {
+    cloud_header_ = laser_cloud->header;
+    // cloud_header_.stamp = ros::Time::now(); // Ouster lidar users may need to uncomment this line
 
-        allocateMemory();
-        resetParameters();
-    }
+    pcl::fromROSMsg(*laser_cloud, *laser_cloud_input_);
 
-    void allocateMemory(){
+    // removeNaNFromPointCloud::
+    //      If the data is dense, we don't need to check for NaN
+    //      Simply copy the data
+    // so, if isDense == true, do nothing???
+    std::vector<int> indices;
+    pcl::removeNaNFromPointCloud(*laser_cloud_input_, *laser_cloud_input_, indices);
 
-        laserCloudIn.reset(new pcl::PointCloud<PointType>());
-        laserCloudInRing.reset(new pcl::PointCloud<PointXYZIR>());
-
-        fullCloud.reset(new pcl::PointCloud<PointType>());
-        fullInfoCloud.reset(new pcl::PointCloud<PointType>());
-
-        groundCloud.reset(new pcl::PointCloud<PointType>());
-        segmentedCloud.reset(new pcl::PointCloud<PointType>());
-        segmentedCloudPure.reset(new pcl::PointCloud<PointType>());
-        outlierCloud.reset(new pcl::PointCloud<PointType>());
-
-        fullCloud->points.resize(N_SCAN*Horizon_SCAN);
-        fullInfoCloud->points.resize(N_SCAN*Horizon_SCAN);
-
-        segMsg.startRingIndex.assign(N_SCAN, 0);
-        segMsg.endRingIndex.assign(N_SCAN, 0);
-
-        segMsg.segmentedCloudGroundFlag.assign(N_SCAN*Horizon_SCAN, false);
-        segMsg.segmentedCloudColInd.assign(N_SCAN*Horizon_SCAN, 0);
-        segMsg.segmentedCloudRange.assign(N_SCAN*Horizon_SCAN, 0);
-
-        std::pair<int8_t, int8_t> neighbor;
-        neighbor.first = -1; neighbor.second =  0; neighborIterator.push_back(neighbor);
-        neighbor.first =  0; neighbor.second =  1; neighborIterator.push_back(neighbor);
-        neighbor.first =  0; neighbor.second = -1; neighborIterator.push_back(neighbor);
-        neighbor.first =  1; neighbor.second =  0; neighborIterator.push_back(neighbor);
-
-        allPushedIndX = new uint16_t[N_SCAN*Horizon_SCAN];
-        allPushedIndY = new uint16_t[N_SCAN*Horizon_SCAN];
-
-        queueIndX = new uint16_t[N_SCAN*Horizon_SCAN];
-        queueIndY = new uint16_t[N_SCAN*Horizon_SCAN];
-    }
-
-    void resetParameters(){
-        laserCloudIn->clear();
-        groundCloud->clear();
-        segmentedCloud->clear();
-        segmentedCloudPure->clear();
-        outlierCloud->clear();
-
-        rangeMat = cv::Mat(N_SCAN, Horizon_SCAN, CV_32F, cv::Scalar::all(FLT_MAX));
-        groundMat = cv::Mat(N_SCAN, Horizon_SCAN, CV_8S, cv::Scalar::all(0));
-        labelMat = cv::Mat(N_SCAN, Horizon_SCAN, CV_32S, cv::Scalar::all(0));
-        labelCount = 1;
-
-        std::fill(fullCloud->points.begin(), fullCloud->points.end(), nanPoint);
-        std::fill(fullInfoCloud->points.begin(), fullInfoCloud->points.end(), nanPoint);
-    }
-
-    ~ImageProjection(){}
-
-    void copyPointCloud(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg){
-
-        cloudHeader = laserCloudMsg->header;
-        // cloudHeader.stamp = ros::Time::now(); // Ouster lidar users may need to uncomment this line
-        pcl::fromROSMsg(*laserCloudMsg, *laserCloudIn);
-        // Remove Nan points
-        std::vector<int> indices;
-        pcl::removeNaNFromPointCloud(*laserCloudIn, *laserCloudIn, indices);
-        // have "ring" channel in the cloud
-        if (useCloudRing == true){
-            pcl::fromROSMsg(*laserCloudMsg, *laserCloudInRing);
-            if (laserCloudInRing->is_dense == false) {
-                ROS_ERROR("Point cloud is not in dense format, please remove NaN points first!");
-                ros::shutdown();
-            }  
+    pcl::PointCloud<PointXYZIR>::Ptr cloud_input_with_ring(new pcl::PointCloud<PointXYZIR>);
+    pcl::fromROSMsg(*laser_cloud, *cloud_input_with_ring);
+    if (useCloudRing == true) {
+        laser_cloud_ring_.resize(laser_cloud_input_->points.size());
+        for (int i = 0; i < indices.size(); i++)
+        {
+            auto &p = cloud_input_with_ring->points[indices[i]];
+            laser_cloud_ring_[i] = p.ring;
         }
     }
-    
-    void cloudHandler(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg){
+}
 
-        // 1. Convert ros message to pcl point cloud
-        copyPointCloud(laserCloudMsg);
-        // 2. Start and end angle of a scan
-        findStartEndAngle();
-        // 3. Range image projection
-        projectPointCloud();
-        // 4. Mark ground points
-        groundRemoval();
-        // 5. Point cloud segmentation
-        cloudSegmentation();
-        // 6. Publish all clouds
-        publishCloud();
-        // 7. Reset parameters for next iteration
-        resetParameters();
+void ImageProjection::cloud_handler(const sensor_msgs::PointCloud2ConstPtr& laser_cloud) {
+    // 1. Convert ros message to pcl point cloud
+    copy_point_cloud(laser_cloud);
+
+    // 2. Start and end angle of a scan
+    calculate_orientation();
+
+    // 3. Range image projection
+    project_point_cloud();
+
+    // 4. Mark ground points
+    extract_ground();
+
+    // 5. Point cloud segmentation
+    extract_segmentation();
+
+    // 6. Publish all clouds
+    publish_cloud();
+
+    // 7. Reset parameters for next iteration
+    reset_parameters();
+}
+
+void ImageProjection::calculate_orientation() {
+    // start and end orientation of this cloud
+    segmented_cloud_msg_.orientation_start = -std::atan2(laser_cloud_input_->points[0].y, laser_cloud_input_->points[0].x);
+    segmented_cloud_msg_.orientation_end   = -std::atan2(laser_cloud_input_->points[laser_cloud_input_->points.size() - 1].y,
+                                                    laser_cloud_input_->points[laser_cloud_input_->points.size() - 1].x) + 2 * M_PI;
+
+    if (segmented_cloud_msg_.orientation_end - segmented_cloud_msg_.orientation_start > 3 * M_PI) {
+        segmented_cloud_msg_.orientation_end -= 2 * M_PI;
+    } else if (segmented_cloud_msg_.orientation_end - segmented_cloud_msg_.orientation_start < M_PI) {
+        segmented_cloud_msg_.orientation_end += 2 * M_PI;
     }
 
-    void findStartEndAngle(){
-        // start and end orientation of this cloud
-        segMsg.startOrientation = -atan2(laserCloudIn->points[0].y, laserCloudIn->points[0].x);
-        segMsg.endOrientation   = -atan2(laserCloudIn->points[laserCloudIn->points.size() - 1].y,
-                                                     laserCloudIn->points[laserCloudIn->points.size() - 1].x) + 2 * M_PI;
-        if (segMsg.endOrientation - segMsg.startOrientation > 3 * M_PI) {
-            segMsg.endOrientation -= 2 * M_PI;
-        } else if (segMsg.endOrientation - segMsg.startOrientation < M_PI)
-            segMsg.endOrientation += 2 * M_PI;
-        segMsg.orientationDiff = segMsg.endOrientation - segMsg.startOrientation;
-    }
+    segmented_cloud_msg_.orientation_diff = segmented_cloud_msg_.orientation_end - segmented_cloud_msg_.orientation_start;
+}
 
-    void projectPointCloud(){
-        // range image projection
-        float verticalAngle, horizonAngle, range;
-        size_t rowIdn, columnIdn, index, cloudSize; 
-        PointType thisPoint;
+int ImageProjection::point_row(const PointType &p, int idx) const {
+    if (useCloudRing == true)
+        return laser_cloud_ring_[idx];
 
-        cloudSize = laserCloudIn->points.size();
+    float vertical_angle = std::atan2(p.z, sqrt(p.x * p.x + p.y * p.y)) * 180 / M_PI;
+    return (vertical_angle + ang_bottom) / laser_resolution_vertical;
+}
 
-        for (size_t i = 0; i < cloudSize; ++i){
+int ImageProjection::point_column(const PointType &p) const {
+    float horizon_angle = std::atan2(p.x, p.y) * 180 / M_PI;
+    int column = -round((horizon_angle - 90.0) / laser_resolution_horizon) + Horizon_SCAN / 2;
+    if (column >= Horizon_SCAN)
+        column -= Horizon_SCAN;
+    return column;
+}
 
-            thisPoint.x = laserCloudIn->points[i].x;
-            thisPoint.y = laserCloudIn->points[i].y;
-            thisPoint.z = laserCloudIn->points[i].z;
-            // find the row and column index in the iamge for this point
-            if (useCloudRing == true){
-                rowIdn = laserCloudInRing->points[i].ring;
-            }
-            else{
-                verticalAngle = atan2(thisPoint.z, sqrt(thisPoint.x * thisPoint.x + thisPoint.y * thisPoint.y)) * 180 / M_PI;
-                rowIdn = (verticalAngle + ang_bottom) / ang_res_y;
-            }
-            if (rowIdn < 0 || rowIdn >= N_SCAN)
-                continue;
+// mark point_label_ from invalid to valid
+void ImageProjection::project_point_cloud() {
+    for (size_t i = 0; i < laser_cloud_input_->points.size(); ++i) {
+        const auto &point = laser_cloud_input_->points[i];
 
-            horizonAngle = atan2(thisPoint.x, thisPoint.y) * 180 / M_PI;
-
-            columnIdn = -round((horizonAngle-90.0)/ang_res_x) + Horizon_SCAN/2;
-            if (columnIdn >= Horizon_SCAN)
-                columnIdn -= Horizon_SCAN;
-
-            if (columnIdn < 0 || columnIdn >= Horizon_SCAN)
-                continue;
-
-            range = sqrt(thisPoint.x * thisPoint.x + thisPoint.y * thisPoint.y + thisPoint.z * thisPoint.z);
-            if (range < sensorMinimumRange)
-                continue;
-            
-            rangeMat.at<float>(rowIdn, columnIdn) = range;
-
-            thisPoint.intensity = (float)rowIdn + (float)columnIdn / 10000.0;
-
-            index = columnIdn  + rowIdn * Horizon_SCAN;
-            fullCloud->points[index] = thisPoint;
-            fullInfoCloud->points[index] = thisPoint;
-            fullInfoCloud->points[index].intensity = range; // the corresponding range of a point is saved as "intensity"
+        int row = point_row(point, i);
+        if (row < 0 || row >= N_SCAN)
+        {
+            continue;
         }
+
+        int column = point_column(point);
+        if (column < 0 || column >= Horizon_SCAN)
+        {
+            continue;
+        }
+
+        float range = sqrt(point.x * point.x + point.y * point.y + point.z * point.z);
+        if (range < sensorMinimumRange)
+        {
+            continue;
+        }
+        projected_cloud_range_.at<float>(row, column) = range;
+
+        int index = index_in_project_cloud(row, column);
+        point_label_[index] = ImageProjection::PointLabel::valid;
+
+        projected_laser_cloud_->points[index] = point;
+        // do nothing, intensity will assign new value in featureAssociation::adjust_distortion()
+        // projected_laser_cloud_->points[index].intensity = row + column / 10000.f;
+
+        projected_laser_cloud_with_intensity_->points[index] = point;
+        projected_laser_cloud_with_intensity_->points[index].intensity = range;
     }
+}
 
+// mark point_label_ from valid to ground
+void ImageProjection::extract_ground() {
+    for (int j = 0; j < Horizon_SCAN; ++j) {
+        for (int i = 0; i < groundScanInd; ++i) {
+            int current_idx = index_in_project_cloud(i, j);
+            int uppper_idx = index_in_project_cloud(i+1, j);
 
-    void groundRemoval(){
-        size_t lowerInd, upperInd;
-        float diffX, diffY, diffZ, angle;
-        // groundMat
-        // -1, no valid info to check if ground of not
-        //  0, initial value, after validation, means not ground
-        //  1, ground
-        for (size_t j = 0; j < Horizon_SCAN; ++j){
-            for (size_t i = 0; i < groundScanInd; ++i){
-
-                lowerInd = j + ( i )*Horizon_SCAN;
-                upperInd = j + (i+1)*Horizon_SCAN;
-
-                if (fullCloud->points[lowerInd].intensity == -1 ||
-                    fullCloud->points[upperInd].intensity == -1){
-                    // no info to check, invalid points
-                    groundMat.at<int8_t>(i,j) = -1;
+            if (point_label_[current_idx] == ImageProjection::PointLabel::invalid
+                || point_label_[upper_idx] == ImageProjection::PointLabel::invalid) {
                     continue;
                 }
-                    
-                diffX = fullCloud->points[upperInd].x - fullCloud->points[lowerInd].x;
-                diffY = fullCloud->points[upperInd].y - fullCloud->points[lowerInd].y;
-                diffZ = fullCloud->points[upperInd].z - fullCloud->points[lowerInd].z;
+                
+            float diff_x = projected_laser_cloud_->points[upper_idx].x - projected_laser_cloud_->points[current_idx].x;
+            float diff_y = projected_laser_cloud_->points[upper_idx].y - projected_laser_cloud_->points[current_idx].y;
+            float diff_z = projected_laser_cloud_->points[upper_idx].z - projected_laser_cloud_->points[current_idx].z;
 
-                angle = atan2(diffZ, sqrt(diffX*diffX + diffY*diffY) ) * 180 / M_PI;
+            float angle = std::atan2(diff_z, sqrt(diff_x*diff_x + diff_y*diff_y)) * 180 / M_PI;
 
-                if (abs(angle - sensorMountAngle) <= 10){
-                    groundMat.at<int8_t>(i,j) = 1;
-                    groundMat.at<int8_t>(i+1,j) = 1;
-                }
-            }
-        }
-        // extract ground cloud (groundMat == 1)
-        // mark entry that doesn't need to label (ground and invalid point) for segmentation
-        // note that ground remove is from 0~N_SCAN-1, need rangeMat for mark label matrix for the 16th scan
-        for (size_t i = 0; i < N_SCAN; ++i){
-            for (size_t j = 0; j < Horizon_SCAN; ++j){
-                if (groundMat.at<int8_t>(i,j) == 1 || rangeMat.at<float>(i,j) == FLT_MAX){
-                    labelMat.at<int>(i,j) = -1;
-                }
-            }
-        }
-        if (pubGroundCloud.getNumSubscribers() != 0){
-            for (size_t i = 0; i <= groundScanInd; ++i){
-                for (size_t j = 0; j < Horizon_SCAN; ++j){
-                    if (groundMat.at<int8_t>(i,j) == 1)
-                        groundCloud->push_back(fullCloud->points[j + i*Horizon_SCAN]);
-                }
+            if (abs(angle - sensorMountAngle) <= 10) {
+                point_label_[current_idx] = ImageProjection::PointLabel::ground;
+                point_label_[upper_idx] = ImageProjection::PointLabel::ground;
             }
         }
     }
 
-    void cloudSegmentation(){
-        // segmentation process
-        for (size_t i = 0; i < N_SCAN; ++i)
-            for (size_t j = 0; j < Horizon_SCAN; ++j)
-                if (labelMat.at<int>(i,j) == 0)
-                    labelComponents(i, j);
-
-        int sizeOfSegCloud = 0;
-        // extract segmented cloud for lidar odometry
-        for (size_t i = 0; i < N_SCAN; ++i) {
-
-            segMsg.startRingIndex[i] = sizeOfSegCloud-1 + 5;
-
-            for (size_t j = 0; j < Horizon_SCAN; ++j) {
-                if (labelMat.at<int>(i,j) > 0 || groundMat.at<int8_t>(i,j) == 1){
-                    // outliers that will not be used for optimization (always continue)
-                    if (labelMat.at<int>(i,j) == 999999){
-                        if (i > groundScanInd && j % 5 == 0){
-                            outlierCloud->push_back(fullCloud->points[j + i*Horizon_SCAN]);
-                            continue;
-                        }else{
-                            continue;
-                        }
-                    }
-                    // majority of ground points are skipped
-                    if (groundMat.at<int8_t>(i,j) == 1){
-                        if (j%5!=0 && j>5 && j<Horizon_SCAN-5)
-                            continue;
-                    }
-                    // mark ground points so they will not be considered as edge features later
-                    segMsg.segmentedCloudGroundFlag[sizeOfSegCloud] = (groundMat.at<int8_t>(i,j) == 1);
-                    // mark the points' column index for marking occlusion later
-                    segMsg.segmentedCloudColInd[sizeOfSegCloud] = j;
-                    // save range info
-                    segMsg.segmentedCloudRange[sizeOfSegCloud]  = rangeMat.at<float>(i,j);
-                    // save seg cloud
-                    segmentedCloud->push_back(fullCloud->points[j + i*Horizon_SCAN]);
-                    // size of seg cloud
-                    ++sizeOfSegCloud;
-                }
+    if (pub_ground_cloud_.getNumSubscribers() > 0) {
+        for (int i = 0; i <= groundScanInd; ++i) {
+            for (int j = 0; j < Horizon_SCAN; ++j) {
+                int idx = index_in_project_cloud(i, j);
+                if (point_label_[idx] == ImageProjection::PointLabel::ground)
+                    projected_ground_cloud_->push_back(projected_laser_cloud_->points[idx]);
             }
-
-            segMsg.endRingIndex[i] = sizeOfSegCloud-1 - 5;
         }
-        
-        // extract segmented cloud for visualization
-        if (pubSegmentedCloudPure.getNumSubscribers() != 0){
-            for (size_t i = 0; i < N_SCAN; ++i){
-                for (size_t j = 0; j < Horizon_SCAN; ++j){
-                    if (labelMat.at<int>(i,j) > 0 && labelMat.at<int>(i,j) != 999999){
-                        segmentedCloudPure->push_back(fullCloud->points[j + i*Horizon_SCAN]);
-                        segmentedCloudPure->points.back().intensity = labelMat.at<int>(i,j);
+    }
+}
+
+// mark point_label_ from valid to segmentation and outlier
+void ImageProjection::extract_segmentation() {
+    for (int i = 0; i < N_SCAN; ++i) {
+        for (int j = 0; j < Horizon_SCAN; ++j) {
+            int idx = index_in_project_cloud(i, j);
+            if (point_label_[idx] == ImageProjection::PointLabel::valid)
+                bfs_cluster(i, j);
+        }
+    }
+
+    int size_of_segment_cloud = 0;
+    for (int i = 0; i < N_SCAN; ++i) {
+        segmented_cloud_msg_.ring_index_start[i] = size_of_segment_cloud - 1 + 5;
+        for (int j = 0; j < Horizon_SCAN; ++j) {
+            int idx = index_in_project_cloud(i, j);
+
+            if (point_label_[idx] == ImageProjection::PointLabel::invalid) {
+                continue;
+            } else if (point_label_[idx] == ImageProjection::PointLabel::outlier) {
+                if (i > groundScanInd && j % 5 == 0) {
+                    projected_outlier_cloud_->push_back(projected_laser_cloud_->points[idx]);
+                }
+            } else {
+                if (point_label_[idx] == ImageProjection::PointLabel::ground) {
+                    if ((j > 5) && (j % 5 != 0) && (j < Horizon_SCAN-5))
+                        continue;
+                } else {    // PointLabel::segmentation
+                    // pure segmented cloud for visualization
+                    if (pub_pure_segmented_cloud_.getNumSubscribers() > 0) {
+                        projected_pure_segmented_cloud_->push_back(projected_laser_cloud_->points[idx]);
+                        projected_pure_segmented_cloud_->points.back().intensity = segmentation_cluster_id_[idx];
                     }
                 }
+
+                projected_ground_segment_cloud_->push_back(projected_laser_cloud_->points[idx]);
+
+                // mark ground points so they will not be considered as edge features later
+                segmented_cloud_msg_.ground_segment_flag[size_of_segment_cloud] = point_label_[idx] == ImageProjection::PointLabel::ground;
+                // mark the points' column index for marking occlusion later
+                segmented_cloud_msg_.ground_segment_cloud_column[size_of_segment_cloud] = j;
+                // save range info
+                segmented_cloud_msg_.ground_segment_cloud_range[size_of_segment_cloud] = projected_cloud_range_.at<float>(i,j);
+
+                // size of seg cloud
+                ++size_of_segment_cloud;
+            }
+        }
+        segmented_cloud_msg_.ring_index_end[i] = size_of_segment_cloud - 1 - 5;
+    }
+}
+
+// use std::queue std::vector std::deque will slow the program down greatly
+void ImageProjection::bfs_cluster(int row, int col) {
+    struct QueueElement
+    {
+        int row;
+        int col;
+    };
+
+    struct Queue
+    {
+        int cluster_size = 0;
+        int size = 0;
+        int start = 0;
+        int end = 0;
+
+        struct QueueElement elements[N_SCAN*Horizon_SCAN]
+    };
+
+    static int segment_id = 1;
+    static bool cross_scan_flag[N_SCAN] = {false};
+    static struct Queue queue;
+    queue.elements[0].row = row;
+    queue.elements[0].col = col;
+    queue.size = 1;
+    queue.start = 0;
+    queue.end = 1;
+    queue.cluster_size = queue.end;
+
+    while (queue.size > 0) {
+        int current_row = queue.element[start].row;
+        int current_col = queue.element[start].col;
+        --queue.size;
+        ++queue.start;
+
+        int idx = index_in_project_cloud(current_row, current_col);
+        point_label_[idx] = ImageProjection::PointLabel::segmentation;
+        segmentation_cluster_id_[idx] = segment_id;
+
+        for (auto &n : neighbors_) {
+            int neibor_row = current_row + n.first;
+            int neibor_col = current_col + n.second;
+
+            // index should be within the boundary
+            if (neibor_row < 0 || neibor_row >= N_SCAN)
+                continue;
+            // at range image margin (left or right side)
+            if (neibor_col < 0)
+                neibor_col = Horizon_SCAN - 1;
+            if (neibor_col >= Horizon_SCAN)
+                neibor_col = 0;
+
+            // prevent infinite loop (caused by put already examined point back)
+            if (segmentation_cluster_id_.find(idx) != segmentation_cluster.end())
+                continue;
+
+            auto &&distance = std::minmax(projected_cloud_range_.at<float>(current_row, current_col), 
+                            projected_cloud_range_.at<float>(neibor_row, neibor_col));
+
+            float alpha = 0.f;
+            if (e.first == 0)
+                alpha = segmentAlphaX;
+            else
+                alpha = segmentAlphaY;
+            float angle = std::atan2(distance.first * std::sin(alpha), (distance.second - distance.first * std::cos(alpha)));
+
+            if (angle > segmentTheta) {
+                queue.element[end].row = neibor_row;
+                queue.element[end].col = neibor_col;
+
+                queue.cluster_size = queue.end;
+                ++queue.size;
+                ++queue.end;
+
+                cross_scan_flag[neibor_row] = true;
             }
         }
     }
 
-    void labelComponents(int row, int col){
-        // use std::queue std::vector std::deque will slow the program down greatly
-        float d1, d2, alpha, angle;
-        int fromIndX, fromIndY, thisIndX, thisIndY; 
-        bool lineCountFlag[N_SCAN] = {false};
-
-        queueIndX[0] = row;
-        queueIndY[0] = col;
-        int queueSize = 1;
-        int queueStartInd = 0;
-        int queueEndInd = 1;
-
-        allPushedIndX[0] = row;
-        allPushedIndY[0] = col;
-        int allPushedIndSize = 1;
-        
-        while(queueSize > 0){
-            // Pop point
-            fromIndX = queueIndX[queueStartInd];
-            fromIndY = queueIndY[queueStartInd];
-            --queueSize;
-            ++queueStartInd;
-            // Mark popped point
-            labelMat.at<int>(fromIndX, fromIndY) = labelCount;
-            // Loop through all the neighboring grids of popped grid
-            for (auto iter = neighborIterator.begin(); iter != neighborIterator.end(); ++iter){
-                // new index
-                thisIndX = fromIndX + (*iter).first;
-                thisIndY = fromIndY + (*iter).second;
-                // index should be within the boundary
-                if (thisIndX < 0 || thisIndX >= N_SCAN)
-                    continue;
-                // at range image margin (left or right side)
-                if (thisIndY < 0)
-                    thisIndY = Horizon_SCAN - 1;
-                if (thisIndY >= Horizon_SCAN)
-                    thisIndY = 0;
-                // prevent infinite loop (caused by put already examined point back)
-                if (labelMat.at<int>(thisIndX, thisIndY) != 0)
-                    continue;
-
-                d1 = std::max(rangeMat.at<float>(fromIndX, fromIndY), 
-                              rangeMat.at<float>(thisIndX, thisIndY));
-                d2 = std::min(rangeMat.at<float>(fromIndX, fromIndY), 
-                              rangeMat.at<float>(thisIndX, thisIndY));
-
-                if ((*iter).first == 0)
-                    alpha = segmentAlphaX;
-                else
-                    alpha = segmentAlphaY;
-
-                angle = atan2(d2*sin(alpha), (d1 -d2*cos(alpha)));
-
-                if (angle > segmentTheta){
-
-                    queueIndX[queueEndInd] = thisIndX;
-                    queueIndY[queueEndInd] = thisIndY;
-                    ++queueSize;
-                    ++queueEndInd;
-
-                    labelMat.at<int>(thisIndX, thisIndY) = labelCount;
-                    lineCountFlag[thisIndX] = true;
-
-                    allPushedIndX[allPushedIndSize] = thisIndX;
-                    allPushedIndY[allPushedIndSize] = thisIndY;
-                    ++allPushedIndSize;
-                }
-            }
-        }
-
-        // check if this segment is valid
-        bool feasibleSegment = false;
-        if (allPushedIndSize >= 30)
-            feasibleSegment = true;
-        else if (allPushedIndSize >= segmentValidPointNum){
-            int lineCount = 0;
-            for (size_t i = 0; i < N_SCAN; ++i)
-                if (lineCountFlag[i] == true)
-                    ++lineCount;
-            if (lineCount >= segmentValidLineNum)
-                feasibleSegment = true;            
-        }
-        // segment is valid, mark these points
-        if (feasibleSegment == true){
-            ++labelCount;
-        }else{ // segment is invalid, mark these points
-            for (size_t i = 0; i < allPushedIndSize; ++i){
-                labelMat.at<int>(allPushedIndX[i], allPushedIndY[i]) = 999999;
-            }
+    // check if this segment is valid
+    if (queue.cluster_size >= 30) {
+        ++segment_id;
+    }
+    else if (queue.cluster_size >= segmentValidPointNum) {
+        if (std::count(cross_scan_flag, cross_scan_flag + N_SCAN, true) >= segmentValidLineNum) {
+            ++segment_id;
         }
     }
-
-    
-    void publishCloud(){
-        // 1. Publish Seg Cloud Info
-        segMsg.header = cloudHeader;
-        pubSegmentedCloudInfo.publish(segMsg);
-        // 2. Publish clouds
-        sensor_msgs::PointCloud2 laserCloudTemp;
-
-        pcl::toROSMsg(*outlierCloud, laserCloudTemp);
-        laserCloudTemp.header.stamp = cloudHeader.stamp;
-        laserCloudTemp.header.frame_id = "base_link";
-        pubOutlierCloud.publish(laserCloudTemp);
-        // segmented cloud with ground
-        pcl::toROSMsg(*segmentedCloud, laserCloudTemp);
-        laserCloudTemp.header.stamp = cloudHeader.stamp;
-        laserCloudTemp.header.frame_id = "base_link";
-        pubSegmentedCloud.publish(laserCloudTemp);
-        // projected full cloud
-        if (pubFullCloud.getNumSubscribers() != 0){
-            pcl::toROSMsg(*fullCloud, laserCloudTemp);
-            laserCloudTemp.header.stamp = cloudHeader.stamp;
-            laserCloudTemp.header.frame_id = "base_link";
-            pubFullCloud.publish(laserCloudTemp);
-        }
-        // original dense ground cloud
-        if (pubGroundCloud.getNumSubscribers() != 0){
-            pcl::toROSMsg(*groundCloud, laserCloudTemp);
-            laserCloudTemp.header.stamp = cloudHeader.stamp;
-            laserCloudTemp.header.frame_id = "base_link";
-            pubGroundCloud.publish(laserCloudTemp);
-        }
-        // segmented cloud without ground
-        if (pubSegmentedCloudPure.getNumSubscribers() != 0){
-            pcl::toROSMsg(*segmentedCloudPure, laserCloudTemp);
-            laserCloudTemp.header.stamp = cloudHeader.stamp;
-            laserCloudTemp.header.frame_id = "base_link";
-            pubSegmentedCloudPure.publish(laserCloudTemp);
-        }
-        // projected full cloud info
-        if (pubFullInfoCloud.getNumSubscribers() != 0){
-            pcl::toROSMsg(*fullInfoCloud, laserCloudTemp);
-            laserCloudTemp.header.stamp = cloudHeader.stamp;
-            laserCloudTemp.header.frame_id = "base_link";
-            pubFullInfoCloud.publish(laserCloudTemp);
+    else { // segment is invalid, mark these points as outlier
+        for (int i = queue.cluster_size; i >= 0; --i) {
+            int idx = index_in_project_cloud(queue.element[i].row, queue.element[i].col);
+            point_label_[idx] = ImageProjection::PointLabel::outlier;
+            segmentation_cluster_id_.erase(idx);
         }
     }
-};
+    std::fill(cross_scan_flag, cross_scan_flag + N_SCAN, false);
 
+    // segmentation_cluster_id_ as unordered_map, may get low performance
+}
 
+void ImageProjection::publish_cloud() {
+    segmented_cloud_msg_.header = cloud_header_;
+    pub_segmented_cloud_info_.publish(segmented_cloud_msg_);
 
+    sensor_msgs::PointCloud2 laser_cloud_temp;
 
-int main(int argc, char** argv){
+    // projected outlier cloud with ground
+    pcl::toROSMsg(*projected_outlier_cloud_, laser_cloud_temp);
+    laser_cloud_temp.header.stamp = cloud_header_.stamp;
+    laser_cloud_temp.header.frame_id = "base_link";
+    pub_outlier_cloud_.publish(laser_cloud_temp);
+
+    // segmented cloud with sparse ground
+    pcl::toROSMsg(*projected_ground_segment_cloud_, laser_cloud_temp);
+    laser_cloud_temp.header.stamp = cloud_header_.stamp;
+    laser_cloud_temp.header.frame_id = "base_link";
+    pub_segmented_cloud_.publish(laser_cloud_temp);
+
+    // projected full cloud
+    if (pub_projected_cloud_.getNumSubscribers() > 0) {
+        pcl::toROSMsg(*projected_laser_cloud_, laser_cloud_temp);
+        laser_cloud_temp.header.stamp = cloud_header_.stamp;
+        laser_cloud_temp.header.frame_id = "base_link";
+        pub_projected_cloud_.publish(laser_cloud_temp);
+    }
+
+    // pure dense ground cloud
+    if (pub_ground_cloud_.getNumSubscribers() > 0) {
+        pcl::toROSMsg(*projected_ground_cloud_, laser_cloud_temp);
+        laser_cloud_temp.header.stamp = cloud_header_.stamp;
+        laser_cloud_temp.header.frame_id = "base_link";
+        pub_ground_cloud_.publish(laser_cloud_temp);
+    }
+
+    // segmented cloud without ground
+    if (pub_pure_segmented_cloud_.getNumSubscribers() > 0) {
+        pcl::toROSMsg(*projected_pure_segmented_cloud_, laser_cloud_temp);
+        laser_cloud_temp.header.stamp = cloud_header_.stamp;
+        laser_cloud_temp.header.frame_id = "base_link";
+        pub_pure_segmented_cloud_.publish(laser_cloud_temp);
+    }
+
+    // projected full cloud with range as intensity
+    if (pub_projected_cloud_with_intensity_.getNumSubscribers() > 0) {
+        pcl::toROSMsg(*projected_laser_cloud_with_intensity_, laser_cloud_temp);
+        laser_cloud_temp.header.stamp = cloud_header_.stamp;
+        laser_cloud_temp.header.frame_id = "base_link";
+        pub_projected_cloud_with_intensity_.publish(laser_cloud_temp);
+    }
+}
+
+int main(int argc, char** argv) {
 
     ros::init(argc, argv, "lego_loam");
     
@@ -519,5 +434,6 @@ int main(int argc, char** argv){
     ROS_INFO("\033[1;32m---->\033[0m Image Projection Started.");
 
     ros::spin();
+
     return 0;
 }

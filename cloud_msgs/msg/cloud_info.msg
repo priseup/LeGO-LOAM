@@ -1,12 +1,12 @@
 Header header 
 
-int32[] startRingIndex
-int32[] endRingIndex
+int32[] ring_index_start
+int32[] ring_index_end
 
-float32 startOrientation
-float32 endOrientation
-float32 orientationDiff
+float32 orientation_start
+float32 orientation_end
+float32 orientation_diff
 
-bool[]    segmentedCloudGroundFlag # true - ground point, false - other points
-uint32[]  segmentedCloudColInd # point column index in range image
-float32[] segmentedCloudRange # point range 
+bool[]    ground_segment_flag # true - ground point, false - other points
+uint32[]  ground_segment_cloud_column # point column index in range image
+float32[] ground_segment_cloud_range # point range 

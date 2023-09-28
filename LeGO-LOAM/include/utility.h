@@ -57,29 +57,29 @@ extern const string imuTopic = "/imu_raw";
 extern const string fileDirectory = "/tmp/";
 
 // Using velodyne cloud "ring" channel for image projection (other lidar may have different name for this channel, change "PointXYZIR" below)
-extern const bool useCloudRing = true; // if true, ang_res_y and ang_bottom are not used
+extern const bool useCloudRing = true; // if true, laser_resolution_vertical and ang_bottom are not used
 
 // VLP-16
 extern const int N_SCAN = 16;
 extern const int Horizon_SCAN = 1800;
-extern const float ang_res_x = 0.2;
-extern const float ang_res_y = 2.0;
+extern const float laser_resolution_horizon = 0.2;
+extern const float laser_resolution_vertical = 2.0;
 extern const float ang_bottom = 15.0+0.1;
 extern const int groundScanInd = 7;
 
 // HDL-32E
 // extern const int N_SCAN = 32;
 // extern const int Horizon_SCAN = 1800;
-// extern const float ang_res_x = 360.0/float(Horizon_SCAN);
-// extern const float ang_res_y = 41.33/float(N_SCAN-1);
+// extern const float laser_resolution_horizon = 360.0/float(Horizon_SCAN);
+// extern const float laser_resolution_vertical = 41.33/float(N_SCAN-1);
 // extern const float ang_bottom = 30.67;
 // extern const int groundScanInd = 20;
 
 // VLS-128
 // extern const int N_SCAN = 128;
 // extern const int Horizon_SCAN = 1800;
-// extern const float ang_res_x = 0.2;
-// extern const float ang_res_y = 0.3;
+// extern const float laser_resolution_horizon = 0.2;
+// extern const float laser_resolution_vertical = 0.3;
 // extern const float ang_bottom = 25.0;
 // extern const int groundScanInd = 10;
 
@@ -88,16 +88,16 @@ extern const int groundScanInd = 7;
 // Ouster OS1-16
 // extern const int N_SCAN = 16;
 // extern const int Horizon_SCAN = 1024;
-// extern const float ang_res_x = 360.0/float(Horizon_SCAN);
-// extern const float ang_res_y = 33.2/float(N_SCAN-1);
+// extern const float laser_resolution_horizon = 360.0/float(Horizon_SCAN);
+// extern const float laser_resolution_vertical = 33.2/float(N_SCAN-1);
 // extern const float ang_bottom = 16.6+0.1;
 // extern const int groundScanInd = 7;
 
 // Ouster OS1-64
 // extern const int N_SCAN = 64;
 // extern const int Horizon_SCAN = 1024;
-// extern const float ang_res_x = 360.0/float(Horizon_SCAN);
-// extern const float ang_res_y = 33.2/float(N_SCAN-1);
+// extern const float laser_resolution_horizon = 360.0/float(Horizon_SCAN);
+// extern const float laser_resolution_vertical = 33.2/float(N_SCAN-1);
 // extern const float ang_bottom = 16.6+0.1;
 // extern const int groundScanInd = 15;
 
@@ -113,8 +113,8 @@ extern const float sensorMountAngle = 0.0;
 extern const float segmentTheta = 60.0/180.0*M_PI; // decrese this value may improve accuracy
 extern const int segmentValidPointNum = 5;
 extern const int segmentValidLineNum = 3;
-extern const float segmentAlphaX = ang_res_x / 180.0 * M_PI;
-extern const float segmentAlphaY = ang_res_y / 180.0 * M_PI;
+extern const float segmentAlphaX = laser_resolution_horizon / 180.0 * M_PI;
+extern const float segmentAlphaY = laser_resolution_vertical / 180.0 * M_PI;
 
 
 extern const int edgeFeatureNum = 2;
@@ -139,11 +139,10 @@ extern const float globalMapVisualizationSearchRadius = 500.0; // key frames wit
 struct smoothness_t{ 
     float value;
     size_t ind;
-};
 
-struct by_value{ 
-    bool operator()(smoothness_t const &left, smoothness_t const &right) { 
-        return left.value < right.value;
+    bool operator < (const smoothness_t &other) const
+    {
+        return value < other.value;
     }
 };
 

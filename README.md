@@ -64,8 +64,8 @@ The key thing to adapt the code to a new sensor is making sure the point cloud c
 ```
 extern const int N_SCAN = 16;
 extern const int Horizon_SCAN = 1800;
-extern const float ang_res_x = 0.2;
-extern const float ang_res_y = 2.0;
+extern const float laser_resolution_horizon = 0.2;
+extern const float laser_resolution_vertical = 2.0;
 extern const float ang_bottom = 15.0;
 extern const int groundScanInd = 7;
 ```
@@ -75,8 +75,8 @@ Another example for Velodyne HDL-32e range image projection:
 ```
 extern const int N_SCAN = 32;
 extern const int Horizon_SCAN = 1800;
-extern const float ang_res_x = 360.0/Horizon_SCAN;
-extern const float ang_res_y = 41.333/float(N_Scan-1);
+extern const float laser_resolution_horizon = 360.0/Horizon_SCAN;
+extern const float laser_resolution_vertical = 41.333/float(N_Scan-1);
 extern const float ang_bottom = 30.666666;
 extern const int groundScanInd = 20;
 ```
