@@ -67,3 +67,10 @@ std::array<float, 3> rotate_by_y_axis(float x, float y, float z, float cos_pitch
 
 std::array<float, 3> rotate_by_z_axis(float x, float y, float z, float yaw);
 std::array<float, 3> rotate_by_z_axis(float x, float y, float z, float cos_yaw, float sin_yaw);
+
+double square_distance(const PointType &p0, const PointType &p1);
+double distance(const PointType &p0, const PointType &p1);
+double range(const PointType &p0);
+
+float shift_distance_by_vel(const float &vel, const float &time);
+float shift_distance_by_acc(const float &acc, const float &time);

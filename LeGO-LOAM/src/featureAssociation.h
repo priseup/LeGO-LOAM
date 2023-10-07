@@ -76,7 +76,6 @@ private:
 
     void publishCloudsLast();
 
-
     void updateImuRollPitchYawStartSinCos() ;
 
     void shift_to_start_imu(float point_time);
@@ -151,7 +150,7 @@ private:
     int *cloudNeighborPicked;
     int *cloud_label_;
 
-    int imuPointerFront = 0;
+    int after_laser_idx = 0;
     int newest_idx = -1;
     int newest_idxIteration = 0;
 
@@ -185,7 +184,7 @@ private:
     };
     struct Imu
     {
-        int imuPointerFront = 0;
+        int after_laser_idx = 0;
         int newest_idx = -1;
 
         int newest_idxIteration = 0;
@@ -235,21 +234,17 @@ private:
 
         struct ImuFrame imu_queue[imuQueLength];
 
-        void newest_idx_increment()
+        int idx_increment(int idx) const
         {
-            newest_idx = (newest_idx + 1) % imuQueLength;
+            return (idx + 1) % imuQueLength;
+        }
+        int idx_decrement(int idx) const
+        {
+            return (idx + imuQueLength - 1) % imuQueLength;
         }
     };
 
     struct Imu imu_cache;
-
-    float imuAngularVeloX[imuQueLength];
-    float imuAngularVeloY[imuQueLength];
-    float imuAngularVeloZ[imuQueLength];
-
-    float imuAngularRotationX[imuQueLength];
-    float imuAngularRotationY[imuQueLength];
-    float imuAngularRotationZ[imuQueLength];
 
     ros::Publisher pub_last_corner_cloud_;
     ros::Publisher pub_last_surf_cloud_;
@@ -258,9 +253,6 @@ private:
 
     int skip_frame_num_ = 1;
     bool systemInitedLM;
-
-    int laserCloudCornerLastNum;
-    int laserCloudSurfLastNum;
 
     int *pointSelCornerInd;
     float *pointSearchCornerInd1;
@@ -285,11 +277,6 @@ private:
 
     pcl::KdTreeFLANN<PointType>::Ptr kdtree_last_corner_;
     pcl::KdTreeFLANN<PointType>::Ptr kdtree_last_surf_;
-
-    std::vector<int> point_search_idx_;
-    std::vector<float> point_search_quare_distance_;
-
-    PointType pointOri, pointSel, tripod1, tripod2, tripod3, pointProj, coeff;
 
     nav_msgs::Odometry laser_odometry_;
 

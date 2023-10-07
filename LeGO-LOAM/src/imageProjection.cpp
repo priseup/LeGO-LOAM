@@ -11,8 +11,8 @@ ImageProjection::ImageProjection(): nh_("~") {
     pub_projected_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/full_cloud_projected", 1);
     pub_projected_cloud_with_intensity_ = nh_.advertise<sensor_msgs::PointCloud2> ("/full_cloud_info", 1);
 
-    pub_ground_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/ground_cloud", 1);
-    pub_segmented_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud", 1);
+    pub_pure_ground_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/ground_cloud", 1);
+    pub_ground_segment_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud", 1);
     pub_pure_segmented_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud_pure", 1);
     pub_segmented_cloud_info_ = nh_.advertise<cloud_msgs::cloud_info> ("/segmented_cloud_info", 1);
     pub_outlier_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/outlier_cloud", 1);
@@ -213,7 +213,7 @@ void ImageProjection::extract_ground() {
         }
     }
 
-    if (pub_ground_cloud_.getNumSubscribers() > 0) {
+    if (pub_pure_ground_cloud_.getNumSubscribers() > 0) {
         for (int i = 0; i <= groundScanInd; ++i) {
             for (int j = 0; j < Horizon_SCAN; ++j) {
                 int idx = index_in_project_cloud(i, j);
@@ -401,11 +401,11 @@ void ImageProjection::publish_cloud() {
     }
 
     // pure dense ground cloud
-    if (pub_ground_cloud_.getNumSubscribers() > 0) {
+    if (pub_pure_ground_cloud_.getNumSubscribers() > 0) {
         pcl::toROSMsg(*projected_ground_cloud_, laser_cloud_temp);
         laser_cloud_temp.header.stamp = cloud_header_.stamp;
         laser_cloud_temp.header.frame_id = "base_link";
-        pub_ground_cloud_.publish(laser_cloud_temp);
+        pub_pure_ground_cloud_.publish(laser_cloud_temp);
     }
 
     // segmented cloud without ground

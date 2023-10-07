@@ -1,6 +1,18 @@
 #include <cmath>
 #include "lego_math.h"
 
+double square_distance(const PointType &p0, const PointType &p1) {
+    return (p0.x - p1.x) * (p0.x - p1.y) + (p0.y - p1.y) * (p0.y - p1.y) + (p0.z - p1.z) * (p0.z - p1.z);
+}
+
+double distance(const PointType &p0, const PointType &p1) {
+    return std::sqrt((p0.x - p1.x) * (p0.x - p1.y) + (p0.y - p1.y) * (p0.y - p1.y) + (p0.z - p1.z) * (p0.z - p1.z));
+}
+
+double laser_range(const PointType &p) {
+    return std::sqrt(p.x * p.x + p.y * p.y + p.z + p.z);
+}
+
 float laser_range(float x, float y, float z) {
     return std::sqrt(x * x + y * y + z * z);
 }
@@ -58,4 +70,16 @@ std::array<float, 3> rotate_by_yxz(float x, float y, float z,
                                     float cos_yaw, float sin_yaw,
                                     float cos_pitch, float sin_pitch,
                                     float cos_roll, float sin_roll) {
+}
+
+float shift_distance_by_vel(const float &vel, const float &time) {
+    return vel * time;
+}
+
+float shift_distance_by_acc(const float &acc, const float &time) {
+    return acc * time * time / 2;
+}
+
+float interpolation_by_linear(const float &start, const float &end, const float &ratio_from_start) {
+    return end * ratio_from_start + start * (1 - ratio_from_sart);
 }

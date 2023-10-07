@@ -178,7 +178,7 @@ private:
     float transformAftMapped[6];
 
 
-    int imuPointerFront;
+    int after_laser_idx;
     int newest_idx;
 
     double imuTime[imuQueLength];
@@ -189,7 +189,7 @@ private:
 
     double timeLastProcessing;
 
-    PointType pointOri, pointSel, pointProj, coeff;
+    PointType p, pointSel, coeff;
 
     cv::Mat matA0;
     cv::Mat matB0;
@@ -335,7 +335,7 @@ public:
             transformAftMapped[i] = 0;
         }
 
-        imuPointerFront = 0;
+        after_laser_idx = 0;
         newest_idx = -1;
 
         for (int i = 0; i < imuQueLength; ++i) {
@@ -464,25 +464,25 @@ public:
     {
 		if (newest_idx >= 0) {
 		    float imuRollLast = 0, imuPitchLast = 0;
-		    while (imuPointerFront != newest_idx) {
-		        if (timeLaserOdometry + scanPeriod < imuTime[imuPointerFront]) {
+		    while (after_laser_idx != newest_idx) {
+		        if (timeLaserOdometry + scanPeriod < imuTime[after_laser_idx]) {
 		            break;
 		        }
-		        imuPointerFront = (imuPointerFront + 1) % imuQueLength;
+		        after_laser_idx = (after_laser_idx + 1) % imuQueLength;
 		    }
 
-		    if (timeLaserOdometry + scanPeriod > imuTime[imuPointerFront]) {
-		        imuRollLast = imuRoll[imuPointerFront];
-		        imuPitchLast = imuPitch[imuPointerFront];
+		    if (timeLaserOdometry + scanPeriod > imuTime[after_laser_idx]) {
+		        imuRollLast = imuRoll[after_laser_idx];
+		        imuPitchLast = imuPitch[after_laser_idx];
 		    } else {
-		        int imuPointerBack = (imuPointerFront + imuQueLength - 1) % imuQueLength;
+		        int imuPointerBack = (after_laser_idx + imuQueLength - 1) % imuQueLength;
 		        float ratioFront = (timeLaserOdometry + scanPeriod - imuTime[imuPointerBack]) 
-		                         / (imuTime[imuPointerFront] - imuTime[imuPointerBack]);
-		        float ratioBack = (imuTime[imuPointerFront] - timeLaserOdometry - scanPeriod) 
-		                        / (imuTime[imuPointerFront] - imuTime[imuPointerBack]);
+		                         / (imuTime[after_laser_idx] - imuTime[imuPointerBack]);
+		        float ratioBack = (imuTime[after_laser_idx] - timeLaserOdometry - scanPeriod) 
+		                        / (imuTime[after_laser_idx] - imuTime[imuPointerBack]);
 
-		        imuRollLast = imuRoll[imuPointerFront] * ratioFront + imuRoll[imuPointerBack] * ratioBack;
-		        imuPitchLast = imuPitch[imuPointerFront] * ratioFront + imuPitch[imuPointerBack] * ratioBack;
+		        imuRollLast = imuRoll[after_laser_idx] * ratioFront + imuRoll[imuPointerBack] * ratioBack;
+		        imuPitchLast = imuPitch[after_laser_idx] * ratioFront + imuPitch[imuPointerBack] * ratioBack;
 		    }
 
 		    transformTobeMapped[0] = 0.998 * transformTobeMapped[0] + 0.002 * imuPitchLast;
@@ -1091,11 +1091,10 @@ public:
     }
 
     void cornerOptimization(int iterCount) {
-
         updatePointAssociateToMapSinCos();
         for (int i = 0; i < laserCloudCornerLastDSNum; i++) {
-            pointOri = laserCloudCornerLastDS->points[i];
-            pointAssociateToMap(&pointOri, &pointSel);
+            const auto &p = laserCloudCornerLastDS->points[i];
+            pointAssociateToMap(&p, &pointSel);
             kdtreeCornerFromMap->nearestKSearch(pointSel, 5, point_search_idx_, point_search_quare_distance_);
             
             if (point_search_quare_distance_[4] < 1.0) {
@@ -1165,7 +1164,7 @@ public:
                     coeff.intensity = s * ld2;
 
                     if (s > 0.1) {
-                        laserCloudOri->push_back(pointOri);
+                        laserCloudOri->push_back(p);
                         coeff_sel_->push_back(coeff);
                     }
                 }
@@ -1176,8 +1175,8 @@ public:
     void surfOptimization(int iterCount) {
         updatePointAssociateToMapSinCos();
         for (int i = 0; i < laserCloudSurfTotalLastDSNum; i++) {
-            pointOri = laserCloudSurfTotalLastDS->points[i];
-            pointAssociateToMap(&pointOri, &pointSel); 
+            const auto &p = laserCloudSurfTotalLastDS->points[i];
+            pointAssociateToMap(&p, &pointSel); 
             kdtreeSurfFromMap->nearestKSearch(pointSel, 5, point_search_idx_, point_search_quare_distance_);
 
             if (point_search_quare_distance_[4] < 1.0) {
@@ -1218,7 +1217,7 @@ public:
                     coeff.intensity = s * pd2;
 
                     if (s > 0.1) {
-                        laserCloudOri->push_back(pointOri);
+                        laserCloudOri->push_back(p);
                         coeff_sel_->push_back(coeff);
                     }
                 }
@@ -1246,21 +1245,21 @@ public:
         cv::Mat matAtB(6, 1, CV_32F, cv::Scalar::all(0));
         cv::Mat matX(6, 1, CV_32F, cv::Scalar::all(0));
         for (int i = 0; i < laserCloudSelNum; i++) {
-            pointOri = laserCloudOri->points[i];
+            const auto &p = laserCloudOri->points[i];
             coeff = coeff_sel_->points[i];
 
-            float arx = (crx*sry*srz*pointOri.x + crx*crz*sry*pointOri.y - srx*sry*pointOri.z) * coeff.x
-                      + (-srx*srz*pointOri.x - crz*srx*pointOri.y - crx*pointOri.z) * coeff.y
-                      + (crx*cry*srz*pointOri.x + crx*cry*crz*pointOri.y - cry*srx*pointOri.z) * coeff.z;
+            float arx = (crx*sry*srz*p.x + crx*crz*sry*p.y - srx*sry*p.z) * coeff.x
+                      + (-srx*srz*p.x - crz*srx*p.y - crx*p.z) * coeff.y
+                      + (crx*cry*srz*p.x + crx*cry*crz*p.y - cry*srx*p.z) * coeff.z;
 
-            float ary = ((cry*srx*srz - crz*sry)*pointOri.x 
-                      + (sry*srz + cry*crz*srx)*pointOri.y + crx*cry*pointOri.z) * coeff.x
-                      + ((-cry*crz - srx*sry*srz)*pointOri.x 
-                      + (cry*srz - crz*srx*sry)*pointOri.y - crx*sry*pointOri.z) * coeff.z;
+            float ary = ((cry*srx*srz - crz*sry)*p.x 
+                      + (sry*srz + cry*crz*srx)*p.y + crx*cry*p.z) * coeff.x
+                      + ((-cry*crz - srx*sry*srz)*p.x 
+                      + (cry*srz - crz*srx*sry)*p.y - crx*sry*p.z) * coeff.z;
 
-            float arz = ((crz*srx*sry - cry*srz)*pointOri.x + (-cry*crz-srx*sry*srz)*pointOri.y)*coeff.x
-                      + (crx*crz*pointOri.x - crx*srz*pointOri.y) * coeff.y
-                      + ((sry*srz + cry*crz*srx)*pointOri.x + (crz*sry-cry*srx*srz)*pointOri.y)*coeff.z;
+            float arz = ((crz*srx*sry - cry*srz)*p.x + (-cry*crz-srx*sry*srz)*p.y)*coeff.x
+                      + (crx*crz*.x - crx*srz*p.y) * coeff.y
+                      + ((sry*srz + cry*crz*srx)*p.x + (crz*sry-cry*srx*srz)*p.y)*coeff.z;
 
             matA.at<float>(i, 0) = arx;
             matA.at<float>(i, 1) = ary;
