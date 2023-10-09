@@ -13,18 +13,18 @@ double laser_range(const PointType &p) {
     return std::sqrt(p.x * p.x + p.y * p.y + p.z + p.z);
 }
 
-float laser_range(float x, float y, float z) {
+float laser_range(const float &x, const float &y, const float &z) {
     return std::sqrt(x * x + y * y + z * z);
 }
 
-std::array<float, 3> rotate_by_x_axis(float x, float y, float z, float roll) {
+std::array<float, 3> rotate_by_x_axis(const float &x, const float &y, const float &z, const float &roll) {
     float rx = x;
     float ry = std::cos(roll) * y - std::sin(roll) * z;
     float rz = std::sin(roll) * y + std::cos(roll) * z;
 
     return {rx, ry, rz};
 }
-std::array<float, 3> rotate_by_x_axis(float x, float y, float z, float cos_roll, float sin_roll) {
+std::array<float, 3> rotate_by_x_axis(const float &x, const float &y, const float &z, const float &cos_roll, const float &sin_roll) {
     float rx = x;
     float ry = cos_roll * y - sin_roll * z;
     float rz = sin_roll * y + cos_roll * z;
@@ -32,44 +32,63 @@ std::array<float, 3> rotate_by_x_axis(float x, float y, float z, float cos_roll,
     return {rx, ry, rz};
 }
 
-std::array<float, 3> rotate_by_y_axis(float x, float y, float z, float pitch) {
+std::array<float, 3> rotate_by_y_axis(const float &x, const float &y, const float &z, const float &pitch) {
     float rx = std::cos(pitch) * x + std::sin(pitch) * z;
     float ry = y;
     float rz = -std::sin(pitch) * x + std::cos(pitch) * z;
+
+    return {rx, ry, rz};
 }
-std::array<float, 3> rotate_by_y_axis(float x, float y, float z, float cos_pitch, float sin_pitch) {
+std::array<float, 3> rotate_by_y_axis(const float &x, const float &y, const float &z, const float &cos_pitch, const float &sin_pitch) {
     float rx = cos_pitch * x + sin_pitch * z;
     float ry = y;
     float rz = -sin_pitch * x + cos_pitch * z;
+
+    return {rx, ry, rz};
 }
 
-std::array<float, 3> rotate_by_z_axis(float x, float y, float z, float yaw) {
+std::array<float, 3> rotate_by_z_axis(const float &x, const float &y, const float &z, const float &yaw) {
     float rx = std::cos(yaw) * x - std::sin(yaw) * y;
     float ry = std::sin(yaw) * x + std::cos(yaw) * y;
     float rz = z;
+
+    return {rx, ry, rz};
 }
-std::array<float, 3> rotate_by_z_axis(float x, float y, float z, float cos_yaw, float sin_yaw) {
+std::array<float, 3> rotate_by_z_axis(const float &x, const float &y, const float &z, const float &cos_yaw, const float &sin_yaw) {
     float rx = cos_yaw * x - sin_yaw * y;
     float ry = sin_yaw * x + cos_yaw * y;
     float rz = z;
+
+    return {rx, ry, rz};
 }
 
-std::array<float, 3> rotate_by_zxy(float x, float y, float z, float yaw, float pitch, float roll) {
-
+std::array<float, 3> rotate_by_zxy(const float &x, const float &y, const float &z, const float &roll, const float &pitch, const float &yaw) {
+    auto r0 = rotate_by_z_axis(x, y, z, yaw);
+    auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2], roll);
+    return rotate_by_y_axis(r1[0], r1[1], r1[2], pitch);
 }
-std::array<float, 3> rotate_by_zxy(float x, float y, float z,
-                                    float cos_yaw, float sin_yaw,
-                                    float cos_pitch, float sin_pitch,
-                                    float cos_roll, float sin_roll) {
+std::array<float, 3> rotate_by_zxy(const float &x, const float &y, const float &z,
+                                    const float &cos_roll, const float &sin_roll,
+                                    const float &cos_pitch, const float &sin_pitch,
+                                    const float &cos_yaw, const float &sin_yaw) {
+    auto r0 = rotate_by_z_axis(x, y, z, cos_yaw, sin_yaw);
+    auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2], cos_roll, sin_roll);
+    return rotate_by_y_axis(r1[0], r1[1], r1[2], cos_pitch, sin_pitch);
 }
 
-std::array<float, 3> rotate_by_yxz(float x, float y, float z, float yaw, float pitch, float roll) {
+std::array<float, 3> rotate_by_yxz(const float &x, const float &y, const float &z, const float &yaw, const float &pitch, const float &roll) {
+    auto r0 = rotate_by_y_axis(x, y, z, pitch);
+    auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2], roll);
+    return rotate_by_z_axis(r1[0], r1[1], r1[2], yaw);
 }
 
-std::array<float, 3> rotate_by_yxz(float x, float y, float z,
-                                    float cos_yaw, float sin_yaw,
-                                    float cos_pitch, float sin_pitch,
-                                    float cos_roll, float sin_roll) {
+std::array<float, 3> rotate_by_yxz(const float &x, const float &y, const float &z,
+                                    const float &cos_roll, const float &sin_roll,
+                                    const float &cos_pitch, const float &sin_pitch,
+                                    const float &cos_yaw, const float &sin_yaw) {
+    auto r0 = rotate_by_y_axis(x, y, z, cos_pitch, sin_pitch);
+    auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2], cos_roll, sin_roll);
+    return rotate_by_z_axis(r1[0], r1[1], r1[2], cos_yaw, sin_yaw);
 }
 
 float shift_distance_by_vel(const float &vel, const float &time) {

@@ -106,32 +106,25 @@ void shift_to_start_imu(float point_time)
     imu_cache.drift_from_start_to_current_y = imu_cache.shift_current_y - imu_cache.shift_start_y - imu_cache.vel_start_y * point_time;
     imu_cache.drift_from_start_to_current_z = imu_cache.shift_current_z - imu_cache.shift_start_z - imu_cache.vel_start_z * point_time;
 
-std::array<float, 3> rotate_by_x_axis(float x, float y, float z, float roll);
-std::array<float, 3> rotate_by_x_axis(float x, float y, float z, float cos_roll, float sin_roll);
-
-std::array<float, 3> rotate_by_y_axis(float x, float y, float z, float pitch);
-std::array<float, 3> rotate_by_y_axis(float x, float y, float z, float cos_pitch, float sin_pitch);
-
-std::array<float, 3> rotate_by_z_axis(float x, float y, float z, float yaw);
-std::array<float, 3> rotate_by_z_axis(float x, float y, float z, float cos_yaw, float sin_yaw);
-
-    // yaw_start_cos/sin, due to the x, y, z--->y, z, x, so roll, pitch, yaw--->pitch, yaw, roll
-    auto r_xyz_0 = rotate_by_z_axis(imu_cahce.drift_from_start_to_current_x,
+    // due to x, y, z--->y, z, x
+    // roll, pitch, yaw--->pitch, yaw, roll
+    auto r0 = rotate_by_y_axis(imu_cahce.drift_from_start_to_current_x,
                                   imu_cahce.drift_from_start_to_current_y,
                                   imu_cahce.drift_from_start_to_current_z,
                                   imu_cache.yaw_start_cos,
-                                  imu_cache.yaw_start_sin);
+                                  -imu_cache.yaw_start_sin);
 
-    auto r_xyz_1 = rotate_by_x_axis(r_xyz_0[0], r_xyz_0[1], r_xyz_0[2],
-                                  imu_cache.pitch_start_cos,
-                                  imu_cache.pitch_start_sin);
-    float x2 = x1;
-    float y2 = imu_cache.pitch_start_cos * y1 + imu_cache.pitch_start_sin * z1;
-    float z2 = -imu_cache.pitch_start_sin * y1 + imu_cache.pitch_start_cos * z1;
+    auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2],
+                            imu_cache.pitch_start_cos,
+                            -imu_cache.pitch_start_sin);
 
-    imu_cache.drift_from_start_to_current_x = imu_cache.roll_start_cos * x2 + imu_cache.roll_start_sin * y2;
-    imu_cache.drift_from_start_to_current_y = -imu_cache.roll_start_sin * x2 + imu_cache.roll_start_cos * y2;
-    imu_cache.drift_from_start_to_current_z = z2;
+    auto r2 = rotate_by_z_axis(r1[0], r1[1], r1[2],
+                            imu_cache.roll_start_cos,
+                            -imu_cache.roll_start_sin);
+
+    imu_cache.drift_from_start_to_current_x = r2[0];
+    imu_cache.drift_from_start_to_current_y = r2[1];
+    imu_cache.drift_from_start_to_current_z = r2[2];
 }
 
 void vel_to_start_imu()
@@ -140,90 +133,90 @@ void vel_to_start_imu()
     imu_cache.vel_diff_from_start_to_current_y = imu_cache.vel_current_y - imu_cache.vel_start_y;
     imu_cache.vel_diff_from_start_to_current_z = imu_cache.vel_current_z - imu_cache.vel_start_z;
 
-    float x1 = yaw_start_cos * imu_cache.vel_diff_from_start_to_current_x - yaw_start_sin * imu_cache.vel_diff_from_start_to_current_z;
-    float y1 = imu_cache.vel_diff_from_start_to_current_y;
-    float z1 = yaw_start_sin * imu_cache.vel_diff_from_start_to_current_x + yaw_start_cos * imu_cache.vel_diff_from_start_to_current_z;
+    auto r0 = rotate_by_y_axis(imu_cache.vel_diff_from_start_to_current_x,
+                               imu_cache.vel_diff_from_start_to_current_y,
+                               imu_cache.vel_diff_from_start_to_current_z,
+                               imu_cache.yaw_start_cos,
+                               -imu_cache.yaw_start_sin);
 
-    float x2 = x1;
-    float y2 = pitch_start_cos * y1 + pitch_start_sin * z1;
-    float z2 = -pitch_start_sin * y1 + pitch_start_cos * z1;
+    auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2],
+                               imu_cache.pitch_start_cos,
+                               -imu_cache.pitch_start_sin);
 
-    imu_cache.vel_diff_from_start_to_current_x = roll_start_cos * x2 + roll_start_sin * y2;
-    imu_cache.vel_diff_from_start_to_current_y = -roll_start_sin * x2 + roll_start_cos * y2;
-    imu_cache.vel_diff_from_start_to_current_z = z2;
+    auto r2 = rotate_by_z_axis(r1[0], r1[1], r1[2],
+                               imu_cache.roll_start_cos,
+                               -imu_cache.roll_start_sin);
+
+    imu_cache.vel_diff_from_start_to_current_x = r2[0];
+    imu_cache.vel_diff_from_start_to_current_y = r2[1];
+    imu_cache.vel_diff_from_start_to_current_z = r2[2];
 }
 
-void transform_to_start_imu(PointType *p)
+void transform_to_start_imu(PointType &p)
 {
-    auto r0 = rotate_by_z_axis(p->x, p->y, p->z, imu_cache.roll_current);
+    auto r0 = rotate_by_z_axis(p.x, p.y, p.z, imu_cahce.roll_current);
     auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2], imu_cache.pitch_current);
     auto r2 = rotate_by_y_axis(r1[0], r1[1], r1[2], imu_cache.yaw_current);
 
-    float x4 = yaw_start_cos * x3 - yaw_start_sin * z3;
-    float y4 = y3;
-    float z4 = yaw_start_sin * x3 + yaw_start_cos * z3;
+    auto r3 = rotate_by_y_axis(r2[0], r2[1], r2[2], imu_cache.yaw_start_cos, -imu_cache.yaw_start_sin);
+    auto r4 = rotate_by_x_axis(r3[0], r3[1], r3[2], imu_cache.pitch_start_cos, -imu_cache.pitch_start_sin);
+    auto r5 = rotate_by_z_axis(r4[0], r4[1], r4[2], imu_cache.roll_start_cos, -imu_cache.roll_start_sin);
 
-    float x5 = x4;
-    float y5 = pitch_start_cos * y4 + pitch_start_sin * z4;
-    float z5 = -pitch_start_sin * y4 + pitch_start_cos * z4;
-
-    p->x = roll_start_cos * x5 + roll_start_sin * y5 + imu_cache.drift_from_start_to_current_x_;
-    p->y = -roll_start_sin * x5 + roll_start_cos * y5 + imu_cache.drift_from_start_to_current_y_;
-    p->z = z5 + drift_from_start_to_current_z_;
+    p->x = r5[0] + imu_cache.drift_from_start_to_current_x_;
+    p->y = r5[1] + imu_cache.drift_from_start_to_current_y_;
+    p->z = r5[2] + imu_cache.drift_from_start_to_current_z_;
 }
 
 void accumulate_imu_shift_rotation()
 {
-    auto &new_imu = imu_cache.imu_queue[newest_idx];
+    auto &imu_new = imu_cache.imu_queue[imu_cache.newest_idx];
+    const auto &imu_last_new = imu_cache.imu_queue[imu_cache.idx_decrement(imu_cache.newest_idx)];
 
-    auto r0 = rotate_by_z_axis(new_imu.acc_x, new_imu.acc_y, new_imu.acc_z, new_imu.roll);
-    auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2], new_imu.pitch);
-    auto r2 = rotate_by_y_axis(r1[0], r1[1], r1[2], new_imu.yaw);
-
-    int last_new = (imu_cache.newest_idx + imuQueLength - 1) % imuQueLength;
-    auto &new_imu = imu_cache.imu_queue[imu_cache.newest_idx];
-    auto &last_new_imu = imu_cache.imu_queue[last_new];
-
-    double time_diff = new_imu.time - new_imu.time;
+    double time_diff = imu_new.time - imu_last_new.time;
     if (time_diff < scanPeriod) {
-        // new_imu.shift_x = last_new_imu.shift_x + shift_distance_by_vel(last_new_imu.vel_x, time) + shift_distance_by_acc(last_new_imu.acc_x, time);
-        new_imu.shift_x = last_new_imu.shift_x + last_new_imu.vel_x * time_diff + last_new_imu.acc_x * time_diff * time_diff / 2;
-        new_imu.shift_y = last_new_imu.shift_y + last_new_imu.vel_y * time_diff + last_new_imu.acc_y * time_diff * time_diff / 2;
-        new_imu.shift_z = last_new_imu.shift_z + last_new_imu.vel_z * time_diff + last_new_imu.acc_z * time_diff * time_diff / 2;
 
-        new_imu.vel_x = last_new_imu.vel_x + r2[0] * time_diff;
-        new_imu.vel_y = last_new_imu.vel_y + r2[1] * time_diff;
-        new_imu.vel_z = last_new_imu.vel_z + r2[2] * time_diff;
+        auto r0 = rotate_by_z_axis(imu_new.acc_x, imu_new.acc_y, imu_new.acc_z, imu_new.roll);
+        auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2], imu_new.pitch);
+        auto r2 = rotate_by_y_axis(r1[0], r1[1], r1[2], imu_new.yaw);
 
-        new_imu.angular_rotation_x = last_new_imu.angular_rotation_x + last_new_imu.angular_vel_x * timeDiff;
-        new_imu.angular_rotation_y = last_new_imu.angular_rotation_y + last_new_imu.angular_vel_y * timeDiff;
-        new_imu.angular_rotation_z = last_new_imu.angular_rotation_z + last_new_imu.angular_vel_z * timeDiff;
+        imu_new.vel_x = imu_last_new.vel_x + r2[0] * time_diff;
+        imu_new.vel_y = imu_last_new.vel_y + r2[1] * time_diff;
+        imu_new.vel_z = imu_last_new.vel_z + r2[2] * time_diff;
+
+        imu_new.shift_x = imu_last_new.shift_x + imu_last_new.vel_x * time_diff + r2[0] * time_diff * time_diff / 2;
+        imu_new.shift_y = imu_last_new.shift_y + imu_last_new.vel_y * time_diff + r2[1] * time_diff * time_diff / 2;
+        imu_new.shift_z = imu_last_new.shift_z + imu_last_new.vel_z * time_diff + r2[2] * time_diff * time_diff / 2;
+
+        imu_new.angular_rotation_x = imu_last_new.angular_rotation_x + imu_last_new.angular_vel_x * time_diff;
+        imu_new.angular_rotation_y = imu_last_new.angular_rotation_y + imu_last_new.angular_vel_y * time_diff;
+        imu_new.angular_rotation_z = imu_last_new.angular_rotation_z + imu_last_new.angular_vel_z * time_diff;
     }
 }
 
-void imu_handler(const sensor_msgs::Imu::ConstPtr& imuIn)
+void imu_handler(const sensor_msgs::Imu::ConstPtr &imu)
 {
-    imu_cache.newest_idx_increment();
-    imu_cache.imu_queue[newest_idx].time = imuIn->header.stamp.toSec();
+    imu_cache.newest_idx = imu_cache.idx_increment(imu_cache.newest_idx);
+    auto &imu_new = imu_cache.imu_queue[imu_cache.newest_idx];
+    imu_new.time = imu->header.stamp.toSec();
 
     double roll, pitch, yaw;
     tf::Quaternion orientation;
-    tf::quaternionMsgToTF(imuIn->orientation, orientation);
+    tf::quaternionMsgToTF(imu->orientation, orientation);
     tf::Matrix3x3(orientation).getRPY(roll, pitch, yaw);
 
-    imu_cache.imu_queue[newest_idx].roll = (float)roll;
-    imu_cache.imu_queue[newest_idx].pitch = (float)pitch;
-    imu_cache.imu_queue[newest_idx].yaw = (float)yaw;
+    imu_new.roll = (float)roll;
+    imu_new.pitch = (float)pitch;
+    imu_new.yaw = (float)yaw;
 
-    imu_cache.imu_queue[newest_idx].acc_x = imuIn->linear_acceleration.y - std::sin(roll) * std::cos(pitch) * 9.81;
-    imu_cache.imu_queue[newest_idx].acc_y = imuIn->linear_acceleration.z - std::cos(roll) * std::cos(pitch) * 9.81;
-    imu_cache.imu_queue[newest_idx].acc_z = imuIn->linear_acceleration.x + std::sin(pitch) * 9.81;
+    imu_new.acc_x = imu->linear_acceleration.y - std::sin(roll) * std::cos(pitch) * 9.81;
+    imu_new.acc_y = imu->linear_acceleration.z - std::cos(roll) * std::cos(pitch) * 9.81;
+    imu_new.acc_z = imu->linear_acceleration.x + std::sin(pitch) * 9.81;
 
-    imu_cache.imu_queue[newest_idx].angular_vel_x = imuIn->angular_velocity.x;
-    imu_cache.imu_queue[newest_idx].angular_vel_y = imuIn->angular_velocity.y;
-    imu_cache.imu_queue[newest_idx].angular_vel_z = imuIn->angular_velocity.z;
+    imu_new.angular_vel_x = imu->angular_velocity.x;
+    imu_new.angular_vel_y = imu->angular_velocity.y;
+    imu_new.angular_vel_z = imu->angular_velocity.z;
 
-    AccumulateIMUShiftAndRotation();
+    accumulate_imu_shift_rotation();
 }
 
 void laser_cloud_handler(const sensor_msgs::PointCloud2ConstPtr& laser_cloud) {
@@ -261,11 +254,12 @@ void adjust_distortion() {
         auto &point = projected_ground_segment_cloud_->points[i];
         float horizontal_angle = -std::atan2(point.y, point.x);
 
-        // point.x = projected_ground_segment_cloud_->points[i].y;
-        // point.y = projected_ground_segment_cloud_->points[i].z;
-        // point.z = projected_ground_segment_cloud_->points[i].x;
-        std::swap(point.x, point.y);
-        std::swap(point.y, point.z);
+        float rx = projected_ground_segment_cloud_->points[i].x;
+        float ry = projected_ground_segment_cloud_->points[i].y;
+        float rz = projected_ground_segment_cloud_->points[i].z;
+        point.x = rz;
+        point.y = rz;
+        point.z = rx;
 
         if (!is_half_pass) {
             if (horizontal_angle < segmented_cloud_msg_.orientation_start - M_PI / 2)
@@ -374,7 +368,7 @@ void adjust_distortion() {
                 updateImuRollPitchYawStartSinCos();
             } else {
                 vel_to_start_imu();
-                transform_to_start_imu(&point);
+                transform_to_start_imu(point);
             }
         }
 
@@ -483,21 +477,19 @@ void extract_features()
 
                     cloudNeighborPicked[idx] = 1;
                     for (int l = 1; l <= 5; l++) {
-                        int columnDiff = std::abs(cloud_column[idx + l] - cloud_column[idx + l - 1]);
-                        if (columnDiff > 10)
+                        if (std::abs(cloud_column[idx + l] - cloud_column[idx + l - 1]) > 10)
                             break;
                         cloudNeighborPicked[idx + l] = 1;
                     }
                     for (int l = -1; l >= -5; l--) {
-                        int columnDiff = std::abs(cloud_column[idx + l] - cloud_column[idx + l + 1]);
-                        if (columnDiff > 10)
+                        if (std::abs(cloud_column[idx + l] - cloud_column[idx + l + 1]) > 10)
                             break;
                         cloudNeighborPicked[idx + l] = 1;
                     }
                 }
             }
 
-            int smallestPickedNum = 0;
+            pick_point_num = 0;
             for (int k = sp; k <= ep; k++) {
                 int idx = cloud_smoothness_[k].ind;
                 if (cloudNeighborPicked[idx] == 0 &&
@@ -507,24 +499,20 @@ void extract_features()
                     cloud_label_[idx] = -1;
                     surf_flat_cloud_->push_back(projected_ground_segment_cloud_->points[idx]);
 
-                    smallestPickedNum++;
-                    if (smallestPickedNum >= 4) {
+                    pick_point_num++;
+                    if (pick_point_num >= 4) {
                         break;
                     }
 
                     cloudNeighborPicked[idx] = 1;
                     for (int l = 1; l <= 5; l++) {
-
-                        int columnDiff = std::abs(int(cloud_column[idx + l] - cloud_column[idx + l - 1]));
-                        if (columnDiff > 10)
+                        if (std::abs(int(cloud_column[idx + l] - cloud_column[idx + l - 1])) > 10)
                             break;
 
                         cloudNeighborPicked[idx + l] = 1;
                     }
                     for (int l = -1; l >= -5; l--) {
-
-                        int columnDiff = std::abs(int(cloud_column[idx + l] - cloud_column[idx + l + 1]));
-                        if (columnDiff > 10)
+                        if (std::abs(int(cloud_column[idx + l] - cloud_column[idx + l + 1])) > 10)
                             break;
 
                         cloudNeighborPicked[idx + l] = 1;
@@ -1286,7 +1274,7 @@ bool calculateTransformation(int iterCount) {
 }
 
 void checkSystemInitialization() {
-
+    std::swap(corner_less_sharp_cloud_, cloud_last_corner_);
     pcl::PointCloud<PointType>::Ptr laser_cloud_temp = corner_less_sharp_cloud_;
     corner_less_sharp_cloud_ = cloud_last_corner_;
     cloud_last_corner_ = laser_cloud_temp;
@@ -1317,10 +1305,9 @@ void checkSystemInitialization() {
 }
 
 void update_initial_guess() {
-
-    imuPitchLast = pitch_current;
-    imuYawLast = yaw_current;
-    imuRollLast = roll_current;
+    imuPitchLast = imu_cache.pitch_current;
+    imuYawLast = imu_cache.yaw_current;
+    imuRollLast = imu_cache.roll_current;
 
     imuShiftFromStartX = imu_cache.drift_from_start_to_current_x;
     imuShiftFromStartY = imu_cache.drift_from_start_to_current_y;

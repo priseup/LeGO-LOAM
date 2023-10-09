@@ -82,7 +82,7 @@ private:
 
     void vel_to_start_imu();
 
-    void transform_to_start_imu(PointType *p);
+    void transform_to_start_imu(PointType &p);
 
     void accumulate_imu_shift_rotation();
 
@@ -149,10 +149,6 @@ private:
     float *cloud_curvature_;
     int *cloudNeighborPicked;
     int *cloud_label_;
-
-    int after_laser_idx = 0;
-    int newest_idx = -1;
-    int newest_idxIteration = 0;
 
     struct ImuFrame
     {
@@ -232,6 +228,10 @@ private:
         float imuAngularRotationXLast, imuAngularRotationYLast, imuAngularRotationZLast;
         float imuAngularFromStartX, imuAngularFromStartY, imuAngularFromStartZ;
 
+    float imuRollLast, imuPitchLast, imuYawLast;
+    float imuShiftFromStartX, imuShiftFromStartY, imuShiftFromStartZ;
+    float imuVeloFromStartX, imuVeloFromStartY, imuVeloFromStartZ;
+
         struct ImuFrame imu_queue[imuQueLength];
 
         int idx_increment(int idx) const
@@ -265,10 +265,6 @@ private:
 
     float transformCur[6];
     float transformSum[6];
-
-    float imuRollLast, imuPitchLast, imuYawLast;
-    float imuShiftFromStartX, imuShiftFromStartY, imuShiftFromStartZ;
-    float imuVeloFromStartX, imuVeloFromStartY, imuVeloFromStartZ;
 
     pcl::PointCloud<PointType>::Ptr cloud_last_corner_;
     pcl::PointCloud<PointType>::Ptr cloud_last_surf_;

@@ -33,13 +33,11 @@
 #include "utility.h"
 
 class TransformFusion{
-
 private:
-
     ros::NodeHandle nh_;
 
     ros::Publisher pubLaserOdometry2;
-    ros::Subscriber subLaserOdometry;
+    ros::Subscriber sub_laser_odom_;
     ros::Subscriber subOdomAftMapped;
   
 
@@ -62,11 +60,9 @@ private:
     std_msgs::Header currentHeader;
 
 public:
-
     TransformFusion() {
-
         pubLaserOdometry2 = nh_.advertise<nav_msgs::Odometry> ("/integrated_to_init", 5);
-        subLaserOdometry = nh_.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 5, &TransformFusion::laserOdometryHandler, this);
+        sub_laser_odom_ = nh_.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 5, &TransformFusion::laserOdometryHandler, this);
         subOdomAftMapped = nh_.subscribe<nav_msgs::Odometry>("/aft_mapped_to_init", 5, &TransformFusion::odomAftMappedHandler, this);
 
         laserOdometry2.header.frame_id = "camera_init";
@@ -215,27 +211,27 @@ public:
         tfBroadcaster2.sendTransform(laserOdometryTrans2);
     }
 
-    void odomAftMappedHandler(const nav_msgs::Odometry::ConstPtr& odomAftMapped)
+    void odomAftMappedHandler(const nav_msgs::Odometry::ConstPtr& odom_mapped_)
     {
         double roll, pitch, yaw;
-        geometry_msgs::Quaternion geoQuat = odomAftMapped->pose.pose.orientation;
+        geometry_msgs::Quaternion geoQuat = odom_mapped_->pose.pose.orientation;
         tf::Matrix3x3(tf::Quaternion(geoQuat.z, -geoQuat.x, -geoQuat.y, geoQuat.w)).getRPY(roll, pitch, yaw);
 
         transformAftMapped[0] = -pitch;
         transformAftMapped[1] = -yaw;
         transformAftMapped[2] = roll;
 
-        transformAftMapped[3] = odomAftMapped->pose.pose.position.x;
-        transformAftMapped[4] = odomAftMapped->pose.pose.position.y;
-        transformAftMapped[5] = odomAftMapped->pose.pose.position.z;
+        transformAftMapped[3] = odom_mapped_->pose.pose.position.x;
+        transformAftMapped[4] = odom_mapped_->pose.pose.position.y;
+        transformAftMapped[5] = odom_mapped_->pose.pose.position.z;
 
-        transformBefMapped[0] = odomAftMapped->twist.twist.angular.x;
-        transformBefMapped[1] = odomAftMapped->twist.twist.angular.y;
-        transformBefMapped[2] = odomAftMapped->twist.twist.angular.z;
+        transformBefMapped[0] = odom_mapped_->twist.twist.angular.x;
+        transformBefMapped[1] = odom_mapped_->twist.twist.angular.y;
+        transformBefMapped[2] = odom_mapped_->twist.twist.angular.z;
 
-        transformBefMapped[3] = odomAftMapped->twist.twist.linear.x;
-        transformBefMapped[4] = odomAftMapped->twist.twist.linear.y;
-        transformBefMapped[5] = odomAftMapped->twist.twist.linear.z;
+        transformBefMapped[3] = odom_mapped_->twist.twist.linear.x;
+        transformBefMapped[4] = odom_mapped_->twist.twist.linear.y;
+        transformBefMapped[5] = odom_mapped_->twist.twist.linear.z;
     }
 };
 

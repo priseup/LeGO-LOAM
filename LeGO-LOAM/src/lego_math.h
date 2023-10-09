@@ -44,27 +44,20 @@ double deg2rad(double degree) {
     return degree * M_PI / 180.0;
 }
 
-float time_liner_interpolation(float prev, float next, float ratio);
+float time_liner_interpolation(const float &prev, const float &next, const float &ratio);
 
-float laser_range(float x, float y, float z);
+float laser_range(const float &x, const float &y, const float &z);
 
-std::array<float, 3> rotate_by_zxy(float x, float y, float z, float yaw, float pitch, float roll);
-std::array<float, 3> rotate_by_zxy(float x, float y, float z,
-                                    float cos_yaw, float sin_yaw,
-                                    float cos_pitch, float sin_pitch,
-                                    float cos_roll, float sin_roll);
-std::array<float, 3> rotate_by_yxz(float x, float y, float z, float yaw, float pitch, float roll);
-std::array<float, 3> rotate_by_yxz(float x, float y, float z,
-                                    float cos_yaw, float sin_yaw,
-                                    float cos_pitch, float sin_pitch,
-                                    float cos_roll, float sin_roll);
+std::array<float, 3> rotate_by_x_axis(const float &x, const float &y, const float &z, const float &roll);
+std::array<float, 3> rotate_by_x_axis(const float &x, const float &y, const float &z, const float &cos_roll, const float &sin_roll);
 
-std::array<float, 3> rotate_by_x_axis(float x, float y, float z, float roll);
-std::array<float, 3> rotate_by_x_axis(float x, float y, float z, float cos_roll, float sin_roll);
+std::array<float, 3> rotate_by_y_axis(const float &x, const float &y, const float &z, const float &pitch);
+std::array<float, 3> rotate_by_y_axis(const float &x, const float &y, const float &z, const float &cos_pitch, const float &sin_pitch);
 
-std::array<float, 3> rotate_by_y_axis(float x, float y, float z, float pitch);
-std::array<float, 3> rotate_by_y_axis(float x, float y, float z, float cos_pitch, float sin_pitch);
+std::array<float, 3> rotate_by_z_axis(const float &x, const float &y, const float &z, const float &yaw);
+std::array<float, 3> rotate_by_z_axis(const float &x, const float &y, const float &z, const float &cos_yaw, const float &sin_yaw);
 
+<<<<<<< HEAD
 std::array<float, 3> rotate_by_z_axis(float x, float y, float z, float yaw);
 std::array<float, 3> rotate_by_z_axis(float x, float y, float z, float cos_yaw, float sin_yaw);
 
@@ -74,3 +67,17 @@ double range(const PointType &p0);
 
 float shift_distance_by_vel(const float &vel, const float &time);
 float shift_distance_by_acc(const float &acc, const float &time);
+=======
+std::array<float, 3> rotate_by_zxy(const float &x, const float &y, const float &z,
+                                    const float &roll, const float &pitch, const float &yaw);
+std::array<float, 3> rotate_by_zxy(const float &x, const float &y, const float &z,
+                                const float &cos_roll, const float &sin_roll,
+                                const float &cos_pitch, const float &sin_pitch,
+                                const float &cos_yaw, const float &sin_yaw);
+
+std::array<float, 3> rotate_by_yxz(const float &x, const float &y, const float &z, const float &roll, const float &pitch, const float &yaw);
+std::array<float, 3> rotate_by_yxz(const float &x, const float &y, const float &z,
+                                const float &cos_roll, const float &sin_roll,
+                                const float &cos_pitch, const float &sin_pitch,
+                                const float &cos_yaw, const float &sin_yaw);
+>>>>>>> fix featureAssociation.cpp
