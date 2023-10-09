@@ -34,6 +34,7 @@
 
 #pragma once
 
+#include "utility.h"
 #include <array>
 
 double rad2deg(double radian) {
@@ -43,6 +44,13 @@ double rad2deg(double radian) {
 double deg2rad(double degree) {
     return degree * M_PI / 180.0;
 }
+
+double square_distance(const PointType &p0, const PointType &p1);
+double distance(const PointType &p0, const PointType &p1);
+double range(const PointType &p0);
+
+float shift_distance_by_vel(const float &vel, const float &time);
+float shift_distance_by_acc(const float &acc, const float &time);
 
 float time_liner_interpolation(const float &prev, const float &next, const float &ratio);
 
@@ -57,17 +65,6 @@ std::array<float, 3> rotate_by_y_axis(const float &x, const float &y, const floa
 std::array<float, 3> rotate_by_z_axis(const float &x, const float &y, const float &z, const float &yaw);
 std::array<float, 3> rotate_by_z_axis(const float &x, const float &y, const float &z, const float &cos_yaw, const float &sin_yaw);
 
-<<<<<<< HEAD
-std::array<float, 3> rotate_by_z_axis(float x, float y, float z, float yaw);
-std::array<float, 3> rotate_by_z_axis(float x, float y, float z, float cos_yaw, float sin_yaw);
-
-double square_distance(const PointType &p0, const PointType &p1);
-double distance(const PointType &p0, const PointType &p1);
-double range(const PointType &p0);
-
-float shift_distance_by_vel(const float &vel, const float &time);
-float shift_distance_by_acc(const float &acc, const float &time);
-=======
 std::array<float, 3> rotate_by_zxy(const float &x, const float &y, const float &z,
                                     const float &roll, const float &pitch, const float &yaw);
 std::array<float, 3> rotate_by_zxy(const float &x, const float &y, const float &z,
@@ -80,4 +77,3 @@ std::array<float, 3> rotate_by_yxz(const float &x, const float &y, const float &
                                 const float &cos_roll, const float &sin_roll,
                                 const float &cos_pitch, const float &sin_pitch,
                                 const float &cos_yaw, const float &sin_yaw);
->>>>>>> fix featureAssociation.cpp
