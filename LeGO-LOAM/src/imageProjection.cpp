@@ -385,7 +385,7 @@ void ImageProjection::publish_cloud() {
     pcl::toROSMsg(*projected_ground_segment_cloud_, laser_cloud_temp);
     laser_cloud_temp.header.stamp = cloud_header_.stamp;
     laser_cloud_temp.header.frame_id = "base_link";
-    pub_segmented_cloud_.publish(laser_cloud_temp);
+    pub_ground_segment_cloud_.publish(laser_cloud_temp);
 
     // projected full cloud
     if (pub_projected_cloud_.getNumSubscribers() > 0) {
@@ -424,7 +424,7 @@ int main(int argc, char** argv) {
 
     ros::init(argc, argv, "lego_loam");
     
-    ImageProjection IP;
+    ImageProjection ip;
 
     ROS_INFO("\033[1;32m---->\033[0m Image Projection Started.");
 

@@ -40,6 +40,7 @@
 #include <gtsam/nonlinear/Marginals.h>
 #include <gtsam/nonlinear/Values.h>
 #include <gtsam/nonlinear/ISAM2.h>
+#include <memory>
 #include <unordered_set>
 #include "utility.h"
 #include "lego_math.h"
@@ -52,7 +53,7 @@ private:
     gtsam::Values initial_estimate_;
     gtsam::Values optimized_estimate_;
     gtsam::Values current_estimate_;
-    gtsam::ISAM2 *isam_;
+    std::unique_ptr<gtsam::ISAM2> isam_;
 
     gtsam::noiseModel::Diagonal::shared_ptr prior_noise_;
     gtsam::noiseModel::Diagonal::shared_ptr odometry_noise_;
@@ -220,10 +221,10 @@ private:
 public:
     mapOptimization(): nh_("~")
     {
-    	ISAM2Params parameters;
+    	gtsam::ISAM2Params parameters;
 		parameters.relinearizeThreshold = 0.01;
 		parameters.relinearizeSkip = 1;
-    	isam_ = new ISAM2(parameters);
+    	isam_->reset(new ISAM2(parameters));
 
         pub_key_poses_ = nh_.advertise<sensor_msgs::PointCloud2>("/key_pose_origin", 2);
         pub_laser_cloud_surround_ = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_surround", 2);
@@ -431,14 +432,13 @@ public:
 		    }
 
             const auto &imu_after_laser = imu_cache.imu[imu_cache.after_laser_idx];
-
 		    if (time_odom_ + scanPeriod > imu_after_laser.time) {
 		        imuRollLast = imu_after_laser.roll;
 		        imuPitchLast = imu_after_laser.pitch;
 		    } else {
                 int before_laser_idx = imu_cache.idx_decrement(imu_cache.after_laser_idx);
                 const auto &imu_before_laser = imu_cache.imu_queue[before_laser_idx];
-                float ratio_from_start = (laser_point_time - imu_before_laser.time) 
+                float ratio_from_start = (time_odom_ + scanPeriod - imu_before_laser.time) 
                 imuRollLast = interpolation_by_linear(imu_before_laser.roll, imu_after_laser.roll, ratio_from_start);
                 imuPitchLast = interpolation_by_linear(imu_before_laser.pitch, imu_after_laser.pitch, ratio_from_start);
 		    }
@@ -545,21 +545,18 @@ public:
 
     void laserCloudOutlierLastHandler(const sensor_msgs::PointCloud2ConstPtr& msg) {
         time_outlier_last_ = msg->header.stamp.toSec();
-        cloud_last_outlier_->clear();
         pcl::fromROSMsg(*msg, *cloud_last_outlier_);
         has_get_outlier_last_ = true;
     }
 
     void laserCloudCornerLastHandler(const sensor_msgs::PointCloud2ConstPtr& msg) {
         time_corner_last_ = msg->header.stamp.toSec();
-        cloud_last_corner_->clear();
         pcl::fromROSMsg(*msg, *cloud_last_corner_);
         has_get_corner_last_ = true;
     }
 
     void laserCloudSurfLastHandler(const sensor_msgs::PointCloud2ConstPtr& msg) {
         time_surf_last_ = msg->header.stamp.toSec();
-        cloud_last_surf_->clear();
         pcl::fromROSMsg(*msg, *cloud_last_surf_);
         has_get_surf_last_ = true;
     }
@@ -1240,19 +1237,18 @@ public:
 
     void scan2MapOptimization() {
         if (corner_map_ds_->points.size() > 10 && surf_map_ds_->points.size() > 100) {
-
             kdtree_corner_map_->setInputCloud(corner_map_ds_);
             kdtree_surf_map_->setInputCloud(surf_map_ds_);
 
-            for (int iterCount = 0; iterCount < 10; iterCount++) {
+            for (int i = 0; i < 10; i++) {
 
                 cloud_ori_->clear();
                 coeff_sel_->clear();
 
-                cornerOptimization(iterCount);
-                surfOptimization(iterCount);
+                cornerOptimization(i);
+                surfOptimization(i);
 
-                if (LMOptimization(iterCount) == true)
+                if (LMOptimization(i) == true)
                     break;              
             }
 

@@ -44,7 +44,7 @@ public:
 private:
     void init();
 
-    Point transform_to_start(const Point &p) const;
+    Point transform_to_start(const Point &p);
     void transform_to_end(Point &p)
 
     void plugin_imu_rotation(float bcx, float bcy, float bcz, float blx, float bly, float blz, 
@@ -56,19 +56,19 @@ private:
     void find_corresponding_corner_features(int iterCount);
     void find_corresponding_surf_features(int iterCount);
 
-    bool calculateTransformationSurf(int iterCount);
+    bool calculate_suf_transformation(int iterCount);
 
-    bool calculateTransformationCorner(int iterCount);
+    bool calculate_corner_transformation(int iterCount);
 
-    bool calculateTransformation(int iterCount);
+    bool calculate_transformation(int iterCount);
 
-    void checkSystemInitialization();
+    void check_system_initialization();
 
     void update_initial_guess();
 
     void update_transformation();
 
-    void integrateTransformation(); 
+    void integrate_transformation(); 
 
     void publish_odometry();
 
@@ -76,7 +76,7 @@ private:
 
     void publish_cloud_last();
 
-    void updateImuRollPitchYawStartSinCos() ;
+    void update_imu_rotation_start_sin_cos();
 
     void shift_to_start_imu(float point_time);
 
@@ -105,50 +105,14 @@ private:
     void publish_cloud();
 
 private:
-	ros::NodeHandle nh_;
-
-    ros::Subscriber sub_laser_cloud_;
-    ros::Subscriber sub_laser_cloud_info_;
-    ros::Subscriber sub_outlier_cloud_;
-    ros::Subscriber sub_imu_;
-
-    ros::Publisher pub_corner_sharp_;
-    ros::Publisher pub_corner_less_sharp_;
-    ros::Publisher pub_surf_flat_;
-    ros::Publisher pub_surf_less_flat_;
-
-    pcl::PointCloud<Point>::Ptr projected_ground_segment_cloud_;
-    pcl::PointCloud<Point>::Ptr projected_outlier_cloud_;
-
-    pcl::PointCloud<Point>::Ptr corner_sharp_cloud_;
-    pcl::PointCloud<Point>::Ptr corner_less_sharp_cloud_;
-    pcl::PointCloud<Point>::Ptr surf_flat_cloud_;
-    pcl::PointCloud<Point>::Ptr surf_less_flat_cloud_;
-
-    pcl::PointCloud<Point>::Ptr surf_less_flat_scan_;
-    pcl::PointCloud<Point>::Ptr surf_less_flat_scan_ds_;
-
-    pcl::VoxelGrid<Point> voxel_grid_filter_;
-
-    double laser_scan_time_ = 0;
-    double segment_cloud_time_ = 0;
-    double segment_cloud_info_time_ = 0;
-    double outlier_cloud_time_ = 0;
-
-    bool has_get_cloud_ = false;
-    bool has_get_cloud_msg_ = false;
-    bool has_get_outlier_cloud_ = false;
-
-    cloud_msgs::cloud_info segmented_cloud_msg_;
-    std_msgs::Header cloud_header_;
-
-    int systemInitCount = 0;
-    bool systemInited = false;
-
-    std::vector<smoothness_t> cloud_smoothness_;
-    float *cloud_curvature_;
-    int *cloudNeighborPicked;
-    int *cloud_label_;
+    enum class FeatureLabel
+    {
+        unknown,
+        surf_flat,
+        surf_less_flat,
+        corner_sharp,
+        corner_less_sharp
+    };
 
     struct ImuFrame
     {
@@ -178,12 +142,11 @@ private:
         float angular_rotation_y = 0.f;
         float angular_rotation_z = 0.f;
     };
-    struct Imu
+    struct ImuCache
     {
-        int after_laser_idx = 0; // first imu newer than laser frame
+        int after_laser_idx = 0; // first imu newer than laser point time
         int newest_idx = -1;
-
-        int newest_idxIteration = 0;
+        int last_new_idx = 0;
 
         float roll_start = 0.f;
         float pitch_start = 0.f;
@@ -224,13 +187,17 @@ private:
         float vel_diff_from_start_to_current_y = 0.f;
         float vel_diff_from_start_to_current_z = 0.f;
 
-        float angular_rotation_current_x, angular_rotation_current_y, angular_rotation_current_z;
-        float imuAngularRotationXLast, imuAngularRotationYLast, imuAngularRotationZLast;
-        float imuAngularFromStartX, imuAngularFromStartY, imuAngularFromStartZ;
+        float angular_rotation_current_x = 0.f;
+        float angular_rotation_current_y = 0.f;
+        float angular_rotation_current_z = 0.f;
 
-    float imuRollLast, imuPitchLast, imuYawLast;
-    float imuShiftFromStartX, imuShiftFromStartY, imuShiftFromStartZ;
-    float imuVeloFromStartX, imuVeloFromStartY, imuVeloFromStartZ;
+        float last_angular_rotation_x = 0.f;
+        float last_angular_rotation_y = 0.f;
+        float last_angular_rotation_z = 0.f;
+
+        float angular_diff_from_start_to_current_x = 0.f;
+        float angular_diff_from_start_to_current_y = 0.f;
+        float angular_diff_from_start_to_current_z = 0.f;
 
         struct ImuFrame imu_queue[imuQueLength];
 
@@ -244,15 +211,67 @@ private:
         }
     };
 
-    struct Imu imu_cache;
+private:
+	ros::NodeHandle nh_;
+
+    ros::Subscriber sub_laser_cloud_;
+    ros::Subscriber sub_laser_cloud_info_;
+    ros::Subscriber sub_outlier_cloud_;
+    ros::Subscriber sub_imu_;
+
+    ros::Publisher pub_corner_sharp_;
+    ros::Publisher pub_corner_less_sharp_;
+    ros::Publisher pub_surf_flat_;
+    ros::Publisher pub_surf_less_flat_;
 
     ros::Publisher pub_last_corner_cloud_;
     ros::Publisher pub_last_surf_cloud_;
     ros::Publisher pub_laser_odometry_;
     ros::Publisher pub_last_outlier_cloud_;
 
+    pcl::PointCloud<Point>::Ptr projected_ground_segment_cloud_;
+    pcl::PointCloud<Point>::Ptr projected_outlier_cloud_;
+
+    pcl::PointCloud<Point>::Ptr corner_sharp_cloud_;
+    pcl::PointCloud<Point>::Ptr corner_less_sharp_cloud_;
+    pcl::PointCloud<Point>::Ptr surf_flat_cloud_;
+    pcl::PointCloud<Point>::Ptr surf_less_flat_cloud_;
+
+    pcl::PointCloud<Point>::Ptr surf_less_flat_scan_;
+    pcl::PointCloud<Point>::Ptr surf_less_flat_scan_ds_;
+
+    pcl::PointCloud<Point>::Ptr cloud_last_corner_;
+    pcl::PointCloud<Point>::Ptr cloud_last_surf_;
+    pcl::PointCloud<Point>::Ptr cloud_ori_;
+    pcl::PointCloud<Point>::Ptr coeff_sel_;
+
+    pcl::KdTreeFLANN<Point>::Ptr kdtree_last_corner_;
+    pcl::KdTreeFLANN<Point>::Ptr kdtree_last_surf_;
+
+    pcl::VoxelGrid<Point> voxel_grid_filter_;
+
+    struct ImuCache imu_cache;
+
+    double laser_scan_time_ = 0;
+    double segment_cloud_time_ = 0;
+    double segment_cloud_info_time_ = 0;
+    double outlier_cloud_time_ = 0;
+
+    bool has_get_cloud_ = false;
+    bool has_get_cloud_msg_ = false;
+    bool has_get_outlier_cloud_ = false;
+
+    cloud_msgs::cloud_info segmented_cloud_msg_;
+    std_msgs::Header cloud_header_;
+
+    std::vector<smoothness_t> cloud_smoothness_;
+    float *cloud_curvature_;
+    int *is_neibor_picked_;
+    std::vector<FeatureLabel> cloud_label_;
+
+    int frame_count_ = 1;
     int skip_frame_num_ = 1;
-    bool systemInitedLM = false;
+    bool is_system_inited_ = false;
 
     float *pointSearchCornerInd1;
     float *pointSearchCornerInd2;
@@ -264,14 +283,6 @@ private:
     float transformCur[6];
     float transform_sum_[6];
 
-    pcl::PointCloud<Point>::Ptr cloud_last_corner_;
-    pcl::PointCloud<Point>::Ptr cloud_last_surf_;
-    pcl::PointCloud<Point>::Ptr cloud_ori_;
-    pcl::PointCloud<Point>::Ptr coeff_sel_;
-
-    pcl::KdTreeFLANN<Point>::Ptr kdtree_last_corner_;
-    pcl::KdTreeFLANN<Point>::Ptr kdtree_last_surf_;
-
     nav_msgs::Odometry laser_odometry_;
 
     tf::TransformBroadcaster tf_broadcaster_;
@@ -279,6 +290,4 @@ private:
 
     bool is_degenerate_ = false;
     cv::Mat mat_p_;
-
-    int frame_count_ = 1;
 };

@@ -136,7 +136,7 @@ extern const float globalMapVisualizationSearchRadius = 500.0; // key frames wit
 
 struct smoothness_t{ 
     float value;
-    size_t ind;
+    size_t idx;
 
     bool operator < (const smoothness_t &other) const
     {

@@ -46,13 +46,13 @@ FeatureAssociation::FeatureAssociation(): nh_("~") {
     init();
 }
 
-void init()
+void FeatureAssociation::init()
 {
     const int points_num = N_SCAN * Horizon_SCAN;
 
     cloud_curvature_ = new float[points_num];
-    cloudNeighborPicked = new int[points_num];
-    cloud_label_ = new int[points_num];
+    is_neibor_picked_ = new int[points_num];
+    cloud_label_.assign(points_num, FeatureAssociation::FeatureLabel::unknown);
 
     pointSearchCornerInd1 = new float[points_num];
     pointSearchCornerInd2 = new float[points_num];
@@ -73,7 +73,7 @@ void init()
     mat_p_ = cv::Mat(6, 6, CV_32F, cv::Scalar::all(0));
 }
 
-void updateImuRollPitchYawStartSinCos() {
+void FeatureAssociation::update_imu_rotation_start_sin_cos() {
     imu_cache.roll_start_cos = std::cos(imu_cache.roll_start);
     imu_cache.pitch_start_cos = std::cos(imu_cache.pitch_start);
     imu_cache.yaw_start_cos = std::cos(imu_cache.yaw_start);
@@ -82,7 +82,7 @@ void updateImuRollPitchYawStartSinCos() {
     imu_cache.yaw_start_sin = std::sin(imu_cache.yaw_start);
 }
 
-void shift_to_start_imu(float point_time)
+void FeatureAssociation::shift_to_start_imu(const float &point_time)
 {
     imu_cache.drift_from_start_to_current_x = imu_cache.shift_current_x - imu_cache.shift_start_x - imu_cache.vel_start_x * point_time;
     imu_cache.drift_from_start_to_current_y = imu_cache.shift_current_y - imu_cache.shift_start_y - imu_cache.vel_start_y * point_time;
@@ -91,19 +91,19 @@ void shift_to_start_imu(float point_time)
     auto r0 = rotate_by_yxz_(imu_cache.drift_from_start_to_current_x,
                             imu_cache.drift_from_start_to_current_y,
                             imu_cache.drift_from_start_to_current_z,
-                            imu_cache.roll_start_cos,
-                            -imu_cache.roll_start_sin,
                             imu_cache.pitch_start_cos,
                             -imu_cache.pitch_start_sin,
                             imu_cache.yaw_start_cos,
-                            -imu_cache.yaw_start_sin);
+                            -imu_cache.yaw_start_sin,
+                            imu_cache.roll_start_cos,
+                            -imu_cache.roll_start_sin);
 
     imu_cache.drift_from_start_to_current_x = r0[0];
     imu_cache.drift_from_start_to_current_y = r0[1];
     imu_cache.drift_from_start_to_current_z = r0[2];
 }
 
-void vel_to_start_imu()
+void FeatureAssociation::vel_to_start_imu()
 {
     imu_cache.vel_diff_from_start_to_current_x = imu_cache.vel_current_x - imu_cache.vel_start_x;
     imu_cache.vel_diff_from_start_to_current_y = imu_cache.vel_current_y - imu_cache.vel_start_y;
@@ -112,39 +112,39 @@ void vel_to_start_imu()
     auto r0 = rotate_by_yxz(imu_cache.vel_diff_from_start_to_current_x,
                                imu_cache.vel_diff_from_start_to_current_y,
                                imu_cache.vel_diff_from_start_to_current_z,
-                               imu_cache.roll_start_cos,
-                               -imu_cache.roll_start_sin,
                                imu_cache.pitch_start_cos,
                                -imu_cache.pitch_start_sin,
                                imu_cache.yaw_start_cos,
-                               -imu_cache.yaw_start_sin);
+                               -imu_cache.yaw_start_sin,
+                               imu_cache.roll_start_cos,
+                               -imu_cache.roll_start_sin);
 
     imu_cache.vel_diff_from_start_to_current_x = r0[0];
     imu_cache.vel_diff_from_start_to_current_y = r0[1];
     imu_cache.vel_diff_from_start_to_current_z = r0[2];
 }
 
-void transform_to_start_imu(Point &p)
+void FeatureAssociation::transform_to_start_imu(Point &p)
 {
-    auto r0 = rotate_by_zxy(p.x, p.y, p.z, imu_cache.roll_current, imu_cache.pitch_current, imu_cache.yaw_current);
+    auto r0 = rotate_by_zxy(p.x, p.y, p.z, imu_cache.pitch_current, imu_cache.yaw_current, imu_cache.roll_current);
     auto r1 = rotate_by_yxz(r0[0], r0[1], r0[2],
-                            imu_cache.roll_start_cos, -imu_cache.roll_start_sin,
                             imu_cache.pitch_start_cos, -imu_cache.pitch_start_sin,
-                            imu_cache.yaw_start_cos, -imu_cache.yaw_start_sin);
+                            imu_cache.yaw_start_cos, -imu_cache.yaw_start_sin,
+                            imu_cache.roll_start_cos, -imu_cache.roll_start_sin);
 
-    p->x = r1[0] + imu_cache.drift_from_start_to_current_x_;
-    p->y = r1[1] + imu_cache.drift_from_start_to_current_y_;
-    p->z = r1[2] + imu_cache.drift_from_start_to_current_z_;
+    p->x = r1[0] + imu_cache.drift_from_start_to_current_x;
+    p->y = r1[1] + imu_cache.drift_from_start_to_current_y;
+    p->z = r1[2] + imu_cache.drift_from_start_to_current_z;
 }
 
-void accumulate_imu_shift_rotation()
+void FeatureAssociation::accumulate_imu_shift_rotation()
 {
     auto &imu_new = imu_cache.imu_queue[imu_cache.newest_idx];
     const auto &imu_last_new = imu_cache.imu_queue[imu_cache.idx_decrement(imu_cache.newest_idx)];
 
     double time_diff = imu_new.time - imu_last_new.time;
     if (time_diff < scanPeriod) {
-        auto r0 = rotate_by_zxy(imu_new.acc_x, imu_new.acc_y, imu_new.acc_z, imu_new.roll, imu_new.pitch, imu_new.yaw);
+        auto r0 = rotate_by_zxy(imu_new.acc_x, imu_new.acc_y, imu_new.acc_z, imu_new.pitch, imu_new.yaw, imu_new.roll);
 
         imu_new.vel_x = imu_last_new.vel_x + r0[0] * time_diff;
         imu_new.vel_y = imu_last_new.vel_y + r0[1] * time_diff;
@@ -160,7 +160,7 @@ void accumulate_imu_shift_rotation()
     }
 }
 
-void imu_handler(const sensor_msgs::Imu::ConstPtr &imu)
+void FeatureAssociation::imu_handler(const sensor_msgs::Imu::ConstPtr &imu)
 {
     imu_cache.newest_idx = imu_cache.idx_increment(imu_cache.newest_idx);
     auto &imu_new = imu_cache.imu_queue[imu_cache.newest_idx];
@@ -186,35 +186,33 @@ void imu_handler(const sensor_msgs::Imu::ConstPtr &imu)
     accumulate_imu_shift_rotation();
 }
 
-void laser_cloud_handler(const sensor_msgs::PointCloud2ConstPtr& laser_cloud) {
+void FeatureAssociation::laser_cloud_handler(const sensor_msgs::PointCloud2ConstPtr& laser_cloud) {
     cloud_header_ = laser_cloud->header;
 
     laser_scan_time_ = cloud_header_.stamp.toSec();
     segment_cloud_time_ = laser_scan_time_;
 
-    projected_ground_segment_cloud_->clear();
     pcl::fromROSMsg(*laser_cloud, *projected_ground_segment_cloud_);
 
     has_get_cloud_ = true;
 }
 
-void outlier_cloud_handler(const sensor_msgs::PointCloud2ConstPtr& msgIn) {
+void FeatureAssociation::outlier_cloud_handler(const sensor_msgs::PointCloud2ConstPtr& msgIn) {
     outlier_cloud_time_ = msgIn->header.stamp.toSec();
 
-    projected_outlier_cloud_->clear();
     pcl::fromROSMsg(*msgIn, *projected_outlier_cloud_);
 
     has_get_outlier_cloud_ = true;
 }
 
-void laser_cloud_msg_handler(const cloud_msgs::cloud_infoConstPtr& msgIn) {
+void FeatureAssociation::laser_cloud_msg_handler(const cloud_msgs::cloud_infoConstPtr& msgIn) {
     segment_cloud_info_time_ = msgIn->header.stamp.toSec();
     segmented_cloud_msg_ = *msgIn;
 
     has_get_cloud_msg_ = true;
 }
 
-void adjust_distortion() {
+void FeatureAssociation::adjust_distortion() {
     bool is_half_pass = false;
 
     for (int i = 0; i < projected_ground_segment_cloud_->points.size(); i++) {
@@ -250,12 +248,12 @@ void adjust_distortion() {
         float laser_point_time = laser_scan_time_ + point_time;
 
         if (imu_cache.newest_idx >= 0) {
-            imu_cache.after_laser_idx = imu_cache.newest_idxIteration;
+            imu_cache.after_laser_idx = imu_cache.last_new_idx;
             while (imu_cache.after_laser_idx != imu_cache.newest_idx) {
                 if (laser_point_time < imu_cache.imu_queue[imu_cache.after_laser_idx].time) {
                     break;
                 }
-                imu_cache.after_laser_idx = imu.idx_increment(imu.after_laser_idx);
+                imu_cache.after_laser_idx = imu_cache.idx_increment(imu_cache.after_laser_idx);
             }
 
             const auto &imu_after_laser = imu_cache.imu_queue[imu_cache.after_laser_idx];
@@ -272,6 +270,12 @@ void adjust_distortion() {
                 imu_cache.shift_current_x = imu_after_laser.shift_x;
                 imu_cache.shift_current_y = imu_after_laser.shift_y;
                 imu_cache.shift_current_z = imu_after_laser.shift_z;
+
+                if (i == 0) {
+                    imu_cache.angular_rotation_current_x = imu_after_laser.angular_rotation_x;
+                    imu_cache.angular_rotation_current_y = imu_after_laser.angular_rotation_y;
+                    imu_cache.angular_rotation_current_z = imu_after_laser.angular_rotation_z;
+                }
             } else {
                 int before_laser_idx = imu_cache.idx_decrement(imu_cache.after_laser_idx);
                 const auto &imu_before_laser = imu_cache.imu_queue[before_laser_idx];
@@ -280,13 +284,14 @@ void adjust_distortion() {
 
                 imu_cache.roll_current = interpolation_by_linear(imu_before_laser.roll, imu_after_laser.roll, ratio_from_start);
                 imu_cache.pitch_current = interpolation_by_linear(imu_before_laser.pitch, imu_after_laser.pitch, ratio_from_start);
+
+                float imu_before_yaw = imu_before_laser.yaw;
                 if (imu_after_laser.yaw - imu_before_laser.yaw > M_PI) {
-                    imu_cache.yaw_current = interpolation_by_linear(imu_before_laser.yaw + 2 * M_PI, imu_after_laser.yaw, ratio_from_start);
+                    imu_before_yaw += 2 * M_PI;
                 } else if (imu_after_laser.yaw - imu_before_laser.yaw < -M_PI) {
-                    imu_cache.yaw_current = interpolation_by_linear(imu_before_laser.yaw - 2 * M_PI, imu_after_laser.yaw, ratio_from_start);
-                } else {
-                    imu_cache.yaw_current = interpolation_by_linear(imu_before_laser.yaw, imu_after_laser.yaw, ratio_from_start);
+                    imu_before_yaw -= 2 * M_PI;
                 }
+                imu_cache.yaw_current = interpolation_by_linear(imu_before_yaw, imu_after_laser.yaw, ratio_from_start);
 
                 imu_cache.vel_current_x = interpolation_by_linear(imu_before_laser.vel_x, imu_after_laser.vel_x, ratio_from_start);
                 imu_cache.vel_current_y = interpolation_by_linear(imu_before_laser.vel_y, imu_after_laser.vel_y, ratio_from_start);
@@ -295,6 +300,12 @@ void adjust_distortion() {
                 imu_cache.shift_current_x = interpolation_by_linear(imu_before_laser.shift_x, imu_after_laser.shift_x, ratio_from_start);
                 imu_cache.shift_current_y = interpolation_by_linear(imu_before_laser.shift_y, imu_after_laser.shift_y, ratio_from_start);
                 imu_cache.shift_current_z = interpolation_by_linear(imu_before_laser.shift_z, imu_after_laser.shift_z, ratio_from_start);
+
+                if (i == 0) {
+                    imu_cache.angular_rotation_current_x = interpolation_by_linear(imu_before_laser.angular_rotation_x, imu_after_laser.angular_rotation_x, ratio_from_start);
+                    imu_cache.angular_rotation_current_y = interpolation_by_linear(imu_before_laser.angular_rotation_y, imu_after_laser.angular_rotation_y, ratio_from_start);
+                    imu_cache.angular_rotation_current_z = interpolation_by_linear(imu_before_laser.angular_rotation_z, imu_after_laser.angular_rotation_z, ratio_from_start);
+                }
             }
 
             if (i == 0) {
@@ -310,41 +321,25 @@ void adjust_distortion() {
                 imu_cache.shift_start_y = imu_cache.shift_current_y;
                 imu_cache.shift_start_z = imu_cache.shift_current_z;
 
-                if (laser_point_time > imu_after_laser.time) {
-                    imu_cache.angular_rotation_current_x = imu_after_laser.angular_rotation_x;
-                    imu_cache.angular_rotation_current_y = imu_after_laser.angular_rotation_y;
-                    imu_cache.angular_rotation_current_z = imu_after_laser.angular_rotation_z;
-                }else{
-                    int before_laser_idx = imu_cache.idx_decrement(imu_cache.after_laser_idx);
-                    const auto &imu_before_laser = imu_cache.imu_queue[before_laser_idx];
-                    float ratio_from_start = (laser_point_time - imu_before_laser.time) 
-                                            / (imu_after_laser.time - imu_before_laser.time);
+                imu_cache.angular_diff_from_start_to_current_x = imu_cache.angular_rotation_current_x - imu_cache.last_angular_rotation_x;
+                imu_cache.angular_diff_from_start_to_current_y = imu_cache.angular_rotation_current_y - imu_cache.last_angular_rotation_y;
+                imu_cache.angular_diff_from_start_to_current_z = imu_cache.angular_rotation_current_z - imu_cache.last_angular_rotation_z;
 
-                    imu_cache.angular_rotation_current_x = interpolation_by_linear(imu_before_laser.angular_rotation_x, imu_after_laser.angular_rotation_x, ratio_from_start);
-                    imu_cache.angular_rotation_current_y = interpolation_by_linear(imu_before_laser.angular_rotation_y, imu_after_laser.angular_rotation_y, ratio_from_start);
-                    imu_cache.angular_rotation_current_z = interpolation_by_linear(imu_before_laser.angular_rotation_z, imu_after_laser.angular_rotation_z, ratio_from_start);
-                }
+                imu_cache.last_angular_rotation_x = imu_cache.angular_rotation_current_x;
+                imu_cache.last_angular_rotation_y = imu_cache.angular_rotation_current_y;
+                imu_cache.last_angular_rotation_z = imu_cache.angular_rotation_current_z;
 
-                imu_cache.imuAngularFromStartX = imu_cache.angular_rotation_current_x - imuAngularRotationXLast;
-                imu_cache.imuAngularFromStartY = imu_cache.angular_rotation_current_y - imuAngularRotationYLast;
-                imu_cache.imuAngularFromStartZ = imu_cache.angular_rotation_current_z - imuAngularRotationZLast;
-
-                imu_cache.imuAngularRotationXLast = imu_cache.angular_rotation_current_x;
-                imu_cache.imuAngularRotationYLast = imu_cache.angular_rotation_current_y;
-                imu_cache.imuAngularRotationZLast = imu_cache.angular_rotation_current_z;
-
-                updateImuRollPitchYawStartSinCos();
+                update_imu_rotation_start_sin_cos();
             } else {
                 vel_to_start_imu();
                 transform_to_start_imu(point);
             }
         }
-
     }
-    newest_idxIteration = newest_idx;
+    imu_cache.last_new_idx = imu_cache.newest_idx;
 }
 
-void calculate_smotthness()
+void FeatureAssociation::calculate_smotthness()
 {
     for (int i = 5; i < projected_ground_segment_cloud_->points.size() - 5; i++) {
         const auto &cloud_range = segmented_cloud_msg_.ground_segment_cloud_range; 
@@ -357,15 +352,14 @@ void calculate_smotthness()
 
         cloud_curvature_[i] = diff_range * diff_range;
 
-        cloudNeighborPicked[i] = 0;
-        cloud_label_[i] = 0;
+        is_neibor_picked_[i] = 0;
 
         cloud_smoothness_[i].value = cloud_curvature_[i];
-        cloud_smoothness_[i].ind = i;
+        cloud_smoothness_[i].idx = i;
     }
 }
 
-void mark_occluded_points()
+void FeatureAssociation::mark_occluded_points()
 {
     const auto &cloud_range = segmented_cloud_msg_.ground_segment_cloud_range;
     const auto &cloud_column = segmented_cloud_msg_.ground_segment_cloud_column;
@@ -376,19 +370,19 @@ void mark_occluded_points()
 
         if (std::abs(int(cloud_column[i+1] - cloud_column[i])) < 10) {
             if (range_i - range_i_1 > 0.3) {
-                cloudNeighborPicked[i - 5] = 1;
-                cloudNeighborPicked[i - 4] = 1;
-                cloudNeighborPicked[i - 3] = 1;
-                cloudNeighborPicked[i - 2] = 1;
-                cloudNeighborPicked[i - 1] = 1;
-                cloudNeighborPicked[i] = 1;
+                is_neibor_picked_[i - 5] = 1;
+                is_neibor_picked_[i - 4] = 1;
+                is_neibor_picked_[i - 3] = 1;
+                is_neibor_picked_[i - 2] = 1;
+                is_neibor_picked_[i - 1] = 1;
+                is_neibor_picked_[i] = 1;
             }else if (range_i_1 - range_i > 0.3) {
-                cloudNeighborPicked[i + 1] = 1;
-                cloudNeighborPicked[i + 2] = 1;
-                cloudNeighborPicked[i + 3] = 1;
-                cloudNeighborPicked[i + 4] = 1;
-                cloudNeighborPicked[i + 5] = 1;
-                cloudNeighborPicked[i + 6] = 1;
+                is_neibor_picked_[i + 1] = 1;
+                is_neibor_picked_[i + 2] = 1;
+                is_neibor_picked_[i + 3] = 1;
+                is_neibor_picked_[i + 4] = 1;
+                is_neibor_picked_[i + 5] = 1;
+                is_neibor_picked_[i + 6] = 1;
             }
         }
 
@@ -396,11 +390,11 @@ void mark_occluded_points()
         float diff_next = std::abs(cloud_range[i+1] - cloud_range[i]);
 
         if (diff_prev > 0.02 * cloud_range[i] && diff_next > 0.02 * cloud_range[i])
-            cloudNeighborPicked[i] = 1;
+            is_neibor_picked_[i] = 1;
     }
 }
 
-void extract_features()
+void FeatureAssociation::extract_features()
 {
     corner_sharp_cloud_->clear();
     corner_less_sharp_cloud_->clear();
@@ -417,93 +411,107 @@ void extract_features()
         for (int j = 0; j < 6; j++) {
             int sp = (segmented_cloud_msg_.ring_index_start[i] * (6 - j)  + segmented_cloud_msg_.ring_index_end[i] * j) / 6;
             int ep = (segmented_cloud_msg_.ring_index_start[i] * (5 - j)  + segmented_cloud_msg_.ring_index_end[i] * (j + 1)) / 6 - 1;
-
             if (sp >= ep)
                 continue;
 
             std::sort(cloud_smoothness_.begin() + sp, cloud_smoothness_.begin() + ep);
 
-            int pick_point_num = 0;
-            for (int k = ep; k >= sp; k--) {
-                int idx = cloud_smoothness_[k].ind;
 
-                if (cloudNeighborPicked[idx] == 0
+            // for (int k = sp; k <= ep; k++) {
+            //     int idx = cloud_smoothness_[k].idx;
+            //     if (is_neibor_picked_[idx] != 0)
+            //         continue;
+
+            //     if (segmented_cloud_msg_.ground_segment_flag[idx] == false && cloud_curvature_[idx] > edgeThreshold) {
+            //         if (corner_sharp_cloud_->size() <= 2) {
+            //             cloud_label_[idx] = FeatureAssociation::FeatureLabel::corner_sharp;
+            //             corner_sharp_cloud_->push_back(cloud[idx]);
+            //             corner_less_sharp_cloud_->push_back(cloud[idx]);
+            //         } else if (corner_less_sharp_cloud_->size() <= 20) {
+            //             cloud_label_[idx] = FeatureAssociation::FeatureLabel::corner_less_sharp;
+            //             corner_less_sharp_cloud_->push_back(cloud[idx]);
+
+            //     } else if {
+
+            //     }
+
+
+            // }
+
+            for (int k = ep; k >= sp; k--) {
+                int idx = cloud_smoothness_[k].idx;
+
+                if (is_neibor_picked_[idx] == 0
                     && cloud_curvature_[idx] > edgeThreshold
                     && segmented_cloud_msg_.ground_segment_flag[idx] == false) {
                 
-                    pick_point_num++;
-                    if (pick_point_num <= 2) {
-                        cloud_label_[idx] = 2;
+                    if (corner_sharp_cloud_->size() <= 2) {
+                        cloud_label_[idx] = FeatureAssociation::FeatureLabel::corner_sharp;
                         corner_sharp_cloud_->push_back(cloud[idx]);
                         corner_less_sharp_cloud_->push_back(cloud[idx]);
-                    } else if (pick_point_num <= 20) {
-                        cloud_label_[idx] = 1;
+                    } else if (corner_less_sharp_cloud_->size() <= 20) {
+                        cloud_label_[idx] = FeatureAssociation::FeatureLabel::corner_less_sharp;
                         corner_less_sharp_cloud_->push_back(cloud[idx]);
                     } else {
                         break;
                     }
 
-                    cloudNeighborPicked[idx] = 1;
+                    is_neibor_picked_[idx] = 1;
                     for (int l = 1; l <= 5; l++) {
                         if (std::abs(cloud_column[idx + l] - cloud_column[idx + l - 1]) > 10)
                             break;
-                        cloudNeighborPicked[idx + l] = 1;
+                        is_neibor_picked_[idx + l] = 1;
                     }
                     for (int l = -1; l >= -5; l--) {
                         if (std::abs(cloud_column[idx + l] - cloud_column[idx + l + 1]) > 10)
                             break;
-                        cloudNeighborPicked[idx + l] = 1;
+                        is_neibor_picked_[idx + l] = 1;
                     }
                 }
             }
 
-            pick_point_num = 0;
             for (int k = sp; k <= ep; k++) {
-                int idx = cloud_smoothness_[k].ind;
-                if (cloudNeighborPicked[idx] == 0 &&
+                int idx = cloud_smoothness_[k].idx;
+
+                if (is_neibor_picked_[idx] == 0 &&
                     cloud_curvature_[idx] < surfThreshold &&
                     segmented_cloud_msg_.ground_segment_flag[idx] == true) {
 
-                    cloud_label_[idx] = -1;
+                    cloud_label_[idx] = FeatureAssociation::FeatureLabel::surf_flat;
                     surf_flat_cloud_->push_back(projected_ground_segment_cloud_->points[idx]);
-
-                    pick_point_num++;
-                    if (pick_point_num >= 4) {
+                    if (surf_flat_cloud_->size() >= 4) {
                         break;
                     }
 
-                    cloudNeighborPicked[idx] = 1;
+                    is_neibor_picked_[idx] = 1;
                     for (int l = 1; l <= 5; l++) {
                         if (std::abs(int(cloud_column[idx + l] - cloud_column[idx + l - 1])) > 10)
                             break;
-
-                        cloudNeighborPicked[idx + l] = 1;
+                        is_neibor_picked_[idx + l] = 1;
                     }
                     for (int l = -1; l >= -5; l--) {
                         if (std::abs(int(cloud_column[idx + l] - cloud_column[idx + l + 1])) > 10)
                             break;
-
-                        cloudNeighborPicked[idx + l] = 1;
+                        is_neibor_picked_[idx + l] = 1;
                     }
                 }
             }
 
             for (int k = sp; k <= ep; k++) {
-                if (cloud_label_[k] <= 0) {
+                if (cloud_label_[k] == FeatureAssociation::FeatureLabel::unknown
+                    ||cloud_label_[k] == FeatureAssociation::FeatureLabel::surf_flat) {
                     surf_less_flat_scan_->push_back(projected_ground_segment_cloud_->points[k]);
                 }
             }
         }
 
-        surf_less_flat_scan_ds_->clear();
         voxel_grid_filter_.setInputCloud(surf_less_flat_scan_);
         voxel_grid_filter_.filter(*surf_less_flat_scan_ds_);
-
         *surf_less_flat_cloud_ += *surf_less_flat_scan_ds_;
     }
 }
 
-void publish_cloud()
+void FeatureAssociation::publish_cloud()
 {
     sensor_msgs::PointCloud2 laser_cloud_msg;
 
@@ -536,105 +544,60 @@ void publish_cloud()
     }
 }
 
-Point transform_to_start(const Point &p) const
+Point FeatureAssociation::transform_to_start(const Point &p)
 {
     float s = 10 * (p.intensity - int(p.intensity));
 
-    float rx = s * transformCur[0];
-    float ry = s * transformCur[1];
-    float rz = s * transformCur[2];
-    float tx = s * transformCur[3];
-    float ty = s * transformCur[4];
-    float tz = s * transformCur[5];
+    auto r = rotate_by_zxy(p.x - s * transformCur[3],
+                           p.y - s * transformCur[4],
+                           p.z - s * transformCur[5],
+                           std::cos(s * transformCur[0]),
+                           -std::sin(s * transformCur[0]),
+                           std::cos(s * transformCur[1]),
+                           -std::sin(s * transformCur[1]),
+                           std::cos(s * transformCur[2]),
+                           -std::sin(s * transformCur[2]));
 
-    float x1 = std::cos(rz) * (p.x - tx) + std::sin(rz) * (p.y - ty);
-    float y1 = -std::sin(rz) * (p.x - tx) + std::cos(rz) * (p.y - ty);
-    float z1 = (pi->z - tz);
+    Point po;
+    po.x = r[0];
+    po.y = r[1];
+    po.z = r[2];
+    po.intensity = p.intensity;
 
-    float x2 = x1;
-    float y2 = std::cos(rx) * y1 + std::sin(rx) * z1;
-    float z2 = -std::sin(rx) * y1 + std::cos(rx) * z1;
-
-    Point r;
-    r.x = std::cos(ry) * x2 - std::sin(ry) * z2;
-    r.y = y2;
-    r.z = std::sin(ry) * x2 + std::cos(ry) * z2;
-    r.intensity = p.intensity;
-
-    return r;
+    return po;
 }
 
-void transform_to_end(Point &p)
+void FeaturpooooAssociation::transform_to_end(Point &p)
 {
-    float s = 10 * (p.intensity - int(p.intensity));
+    Point po = transform_to_start(p);
 
-    float rx = s * transformCur[0];
-    float ry = s * transformCur[1];
-    float rz = s * transformCur[2];
-    float tx = s * transformCur[3];
-    float ty = s * transformCur[4];
-    float tz = s * transformCur[5];
+    auto r0 = rotate_by_yxz(po.x, po.y, po.z,
+                           std::cos(transformCur[0]),
+                           std::sin(transformCur[0]),
+                           std::cos(transformCur[1]),
+                           std::sin(transformCur[1]),
+                           std::cos(transformCur[2]),
+                           std::sin(transformCur[2]));
 
-    float x1 = std::cos(rz) * (p.x - tx) + std::sin(rz) * (p.y - ty);
-    float y1 = -std::sin(rz) * (p.x - tx) + std::cos(rz) * (p.y - ty);
-    float z1 = (p.z - tz);
+    auto r1 = rotate_by_zxy(r0[0] + transformCur[3] - imu_cache.drift_from_start_to_current_x,
+                            r0[1] + transformCur[4] - imu_cache.drift_from_start_to_current_y,
+                            r0[2] + transformCur[5] - imu_cache.drift_from_start_to_current_z,
+                            imu_cache.pitch_start_cos, imu_cache.pitch_start_sin,
+                            imu_cache.yaw_start_cos, imu_cache.yaw_start_sin,
+                            imu_cache.roll_start_cos, imu_cache.roll_start_sin);
+                            
+    auto r2 = rotate_by_yxz(r1[0], r1[1], r1[2],
+                            std::cos(imu_cache.pitch_current), -std::sin(imu_cache.pitch_current),
+                            std::cos(imu_cache.yaw_current), -std::sin(imu_cache.yaw_current),
+                            std::cos(imu_cache.roll_current), -std::sin(imu_cache.roll_current));
 
-    float x2 = x1;
-    float y2 = std::cos(rx) * y1 + std::sin(rx) * z1;
-    float z2 = -std::sin(rx) * y1 + std::cos(rx) * z1;
-
-    float x3 = std::cos(ry) * x2 - std::sin(ry) * z2;
-    float y3 = y2;
-    float z3 = std::sin(ry) * x2 + std::cos(ry) * z2;
-
-    rx = transformCur[0];
-    ry = transformCur[1];
-    rz = transformCur[2];
-    tx = transformCur[3];
-    ty = transformCur[4];
-    tz = transformCur[5];
-
-    float x4 = std::cos(ry) * x3 + std::sin(ry) * z3;
-    float y4 = y3;
-    float z4 = -std::sin(ry) * x3 + std::cos(ry) * z3;
-
-    float x5 = x4;
-    float y5 = std::cos(rx) * y4 - std::sin(rx) * z4;
-    float z5 = std::sin(rx) * y4 + std::cos(rx) * z4;
-
-    float x6 = std::cos(rz) * x5 - std::sin(rz) * y5 + tx;
-    float y6 = std::sin(rz) * x5 + std::cos(rz) * y5 + ty;
-    float z6 = z5 + tz;
-
-    float x7 = roll_start_cos * (x6 - imuShiftFromStartX) 
-                - roll_start_sin * (y6 - imuShiftFromStartY);
-    float y7 = roll_start_sin * (x6 - imuShiftFromStartX) 
-                + roll_start_cos * (y6 - imuShiftFromStartY);
-    float z7 = z6 - imuShiftFromStartZ;
-
-    float x8 = x7;
-    float y8 = pitch_start_cos * y7 - pitch_start_sin * z7;
-    float z8 = pitch_start_sin * y7 + pitch_start_cos * z7;
-
-    float x9 = yaw_start_cos * x8 + yaw_start_sin * z8;
-    float y9 = y8;
-    float z9 = -yaw_start_sin * x8 + yaw_start_cos * z8;
-
-    float x10 = std::cos(imuYawLast) * x9 - std::sin(imuYawLast) * z9;
-    float y10 = y9;
-    float z10 = std::sin(imuYawLast) * x9 + std::cos(imuYawLast) * z9;
-
-    float x11 = x10;
-    float y11 = std::cos(imuPitchLast) * y10 + std::sin(imuPitchLast) * z10;
-    float z11 = -std::sin(imuPitchLast) * y10 + std::cos(imuPitchLast) * z10;
-
-    p.x = std::cos(imuRollLast) * x11 + std::sin(imuRollLast) * y11;
-    p.y = -std::sin(imuRollLast) * x11 + std::cos(imuRollLast) * y11;
-    p.z = z11;
-    p.intensity = int(pi->intensity);
+    p.x = r2[0];
+    p.y = r2[1];
+    p.z = r2[2];
+    p.intensity = (int)p.intensity;
 }
 
-void plugin_imu_rotation(float bcx, float bcy, float bcz, float blx, float bly, float blz, 
+void FeatureAssociation::plugin_imu_rotation(float bcx, float bcy, float bcz, float blx, float bly, float blz, 
                         float alx, float aly, float alz, float &acx, float &acy, float &acz)
 {
     float sbcx = std::sin(bcx);
@@ -694,8 +657,9 @@ void plugin_imu_rotation(float bcx, float bcy, float bcz, float blx, float bly, 
     acz = std::atan2(srzcrx / std::cos(acx), crzcrx / std::cos(acx));
 }
 
-void accumulate_rotation(float cx, float cy, float cz, float lx, float ly, float lz, 
-                        float &ox, float &oy, float &oz)
+void FeatureAssociation::accumulate_rotation(const float &cx, const float &cy, const float &cz,
+                                    const float &lx, const float &ly, const float &lz, 
+                                    float &ox, float &oy, float &oz)
 {
     float srx = std::cos(lx)*std::cos(cx)*std::sin(ly)*std::sin(cz) - std::cos(cx)*std::cos(cz)*std::sin(lx) - std::cos(lx)*std::cos(ly)*std::sin(cx);
     ox = -asin(srx);
@@ -713,49 +677,49 @@ void accumulate_rotation(float cx, float cy, float cz, float lx, float ly, float
     oz = std::atan2(srzcrx / std::cos(ox), crzcrx / std::cos(ox));
 }
 
-void find_corresponding_corner_features(int iterCount) {
+void FeatureAssociation::find_corresponding_corner_features(int iterCount) {
     for (int i = 0; i < corner_sharp_cloud_->points.size(); i++) {
         auto p = transform_to_start(corner_sharp_cloud_->points[i]);
-        if (iterCount % 5 == 0) {
-            std::vector<int> closest_indices;
-            std::vector<float> closest_square_distances;
+        if (iterCount % 5 != 0) {
+            continue;
+        }
+        std::vector<int> closest_indices;
+        std::vector<float> closest_square_distances;
+        kdtree_last_corner_->nearestKSearch(p, 1, closest_indices, closest_square_distances);
+        int minPointInd2 = -1;
+        
+        if (closest_square_distances[0] < nearestFeatureSearchSqDist) {
+            int idx = closest_indices[0];
+            int closest_scan_id = int(cloud_last_corner_->points[idx].intensity);
 
-            kdtree_last_corner_->nearestKSearch(p, 1, closest_indices, closest_square_distances);
-            int minPointInd2 = -1;
-            
-            if (closest_square_distances[0] < nearestFeatureSearchSqDist) {
-                const auto &c0 = closest_indices[0];
-                int closestPointScan = int(cloud_last_corner_->points[c0].intensity);
-
-                float pointSqDis, minPointSqDis2 = nearestFeatureSearchSqDist;
-                for (int j = c0 + 1; j < corner_sharp_cloud_->points.size(); j++) {
-                    if (int(cloud_last_corner_->points[j].intensity) > closestPointScan + 2.5) {
-                        break;
-                    }
-                    pointSqDis = square_distance(cloud_last_corner_->points[j], p);
-                    if (int(cloud_last_corner_->points[j].intensity) > closestPointScan) {
-                        if (pointSqDis < minPointSqDis2) {
-                            minPointSqDis2 = pointSqDis;
-                            minPointInd2 = j;
-                        }
+            float minPointSqDis2 = nearestFeatureSearchSqDist;
+            for (int j = idx + 1; j < corner_sharp_cloud_->points.size(); j++) {
+                if (int(cloud_last_corner_->points[j].intensity) > closest_scan_id + 2.5) {
+                    break;
+                }
+                float d = square_distance(cloud_last_corner_->points[j], p);
+                if (int(cloud_last_corner_->points[j].intensity) > closest_scan_id) {
+                    if (d < minPointSqDis2) {
+                        minPointSqDis2 = d;
+                        minPointInd2 = j;
                     }
                 }
-                for (int j = c0 - 1; j >= 0; j--) {
-                    if (int(cloud_last_corner_->points[j].intensity) < closestPointScan - 2.5) {
-                        break;
-                    }
+            }
+            for (int j = idx - 1; j >= 0; j--) {
+                if (int(cloud_last_corner_->points[j].intensity) < closest_scan_id - 2.5) {
+                    break;
+                }
 
-                    pointSqDis = square_distance(cloud_last_corner_->points[j], p);
-                    if (int(cloud_last_corner_->points[j].intensity) < closestPointScan) {
-                        if (pointSqDis < minPointSqDis2) {
-                            minPointSqDis2 = pointSqDis;
-                            minPointInd2 = j;
-                        }
+                float d = square_distance(cloud_last_corner_->points[j], p);
+                if (int(cloud_last_corner_->points[j].intensity) < closest_scan_id) {
+                    if (d < minPointSqDis2) {
+                        minPointSqDis2 = d;
+                        minPointInd2 = j;
                     }
                 }
             }
 
-            pointSearchCornerInd1[i] = c0;
+            pointSearchCornerInd1[i] = idx;
             pointSearchCornerInd2[i] = minPointInd2;
         }
 
@@ -777,9 +741,9 @@ void find_corresponding_corner_features(int iterCount) {
             float m22 = ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1));
             float m33 = ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1));
 
-            float a012 = sqrt(m11 * m11  + m22 * m22 + m33 * m33);
+            float a012 = std::sqrt(m11 * m11  + m22 * m22 + m33 * m33);
 
-            float l12 = sqrt((x1 - x2)*(x1 - x2) + (y1 - y2)*(y1 - y2) + (z1 - z2)*(z1 - z2));
+            float l12 = std::sqrt((x1 - x2)*(x1 - x2) + (y1 - y2)*(y1 - y2) + (z1 - z2)*(z1 - z2));
 
             float la =  ((y1 - y2)*m11 + (z1 - z2)*m22) / a012 / l12;
 
@@ -802,66 +766,65 @@ void find_corresponding_corner_features(int iterCount) {
     }
 }
 
-void find_corresponding_surf_features(int iterCount) {
+void FeatureAssociation::find_corresponding_surf_features(int iterCount) {
     for (int i = 0; i < surf_flat_cloud_->points.size(); i++) {
         auto p = transform_to_start(surf_flat_cloud_->points[i]);
-        if (iterCount % 5 == 0) {
-            std::vector<int> closest_indices;
-            std::vector<float> closest_square_distances;
+        if (iterCount % 5 != 0) {
+            continue;
+        }
+        std::vector<int> closest_indices;
+        std::vector<float> closest_square_distances;
+        kdtree_last_surf_->nearestKSearch(p, 1, closest_indices, closest_square_distances);
+        int minPointInd2 = -1, minPointInd3 = -1;
 
-            kdtree_last_surf_->nearestKSearch(p, 1, closest_indices, closest_square_distances);
-            int minPointInd2 = -1, minPointInd3 = -1;
+        if (closest_square_distances[0] < nearestFeatureSearchSqDist) {
+            int idx = closest_indices[0];
+            int closest_scan_id = int(cloud_last_surf_->points[idx].intensity);
 
-            if (closest_square_distances[0] < nearestFeatureSearchSqDist) {
-                const auto &c0 = closest_indices[0];
-                int closestPointScan = int(cloud_last_surf_->points[const auto &c0].intensity);
-
-                float pointSqDis, minPointSqDis2 = nearestFeatureSearchSqDist, minPointSqDis3 = nearestFeatureSearchSqDist;
-                for (int j = const auto &c0 + 1; j < surf_flat_cloud_->points.size(); j++) {
-                    if (int(cloud_last_surf_->points[j].intensity) > closestPointScan + 2.5) {
-                        break;
-                    }
-
-                    pointSqDis = square_distance(cloud_last_surf_->points[j], p);
-                    if (int(cloud_last_surf_->points[j].intensity) <= closestPointScan) {
-                        if (pointSqDis < minPointSqDis2) {
-                            minPointSqDis2 = pointSqDis;
-                            minPointInd2 = j;
-                        }
-                    } else {
-                        if (pointSqDis < minPointSqDis3) {
-                            minPointSqDis3 = pointSqDis;
-                            minPointInd3 = j;
-                        }
-                    }
+            float minPointSqDis2 = nearestFeatureSearchSqDist, minPointSqDis3 = nearestFeatureSearchSqDist;
+            for (int j = idx + 1; j < surf_flat_cloud_->points.size(); j++) {
+                if (int(cloud_last_surf_->points[j].intensity) > closest_scan_id + 2.5) {
+                    break;
                 }
-                for (int j = const auto &c0 - 1; j >= 0; j--) {
-                    if (int(cloud_last_surf_->points[j].intensity) < closestPointScan - 2.5) {
-                        break;
-                    }
 
-                    pointSqDis = square_distance(cloud_last_surf_->points[j], p);
-                    if (int(cloud_last_surf_->points[j].intensity) >= closestPointScan) {
-                        if (pointSqDis < minPointSqDis2) {
-                            minPointSqDis2 = pointSqDis;
-                            minPointInd2 = j;
-                        }
-                    } else {
-                        if (pointSqDis < minPointSqDis3) {
-                            minPointSqDis3 = pointSqDis;
-                            minPointInd3 = j;
-                        }
+                float d = square_distance(cloud_last_surf_->points[j], p);
+                if (int(cloud_last_surf_->points[j].intensity) <= closest_scan_id) {
+                    if (d < minPointSqDis2) {
+                        minPointSqDis2 = d;
+                        minPointInd2 = j;
+                    }
+                } else {
+                    if (d < minPointSqDis3) {
+                        minPointSqDis3 = d;
+                        minPointInd3 = j;
                     }
                 }
             }
+            for (int j = idx - 1; j >= 0; j--) {
+                if (int(cloud_last_surf_->points[j].intensity) < closest_scan_id - 2.5) {
+                    break;
+                }
 
-            pointSearchSurfInd1[i] = const auto &c0;
-            pointSearchSurfInd2[i] = minPointInd2;
-            pointSearchSurfInd3[i] = minPointInd3;
+                float d = square_distance(cloud_last_surf_->points[j], p);
+                if (int(cloud_last_surf_->points[j].intensity) >= closest_scan_id) {
+                    if (d < minPointSqDis2) {
+                        minPointSqDis2 = d;
+                        minPointInd2 = j;
+                    }
+                } else {
+                    if (d < minPointSqDis3) {
+                        minPointSqDis3 = d;
+                        minPointInd3 = j;
+                    }
+                }
+            }
         }
 
-        if (pointSearchSurfInd2[i] >= 0 && pointSearchSurfInd3[i] >= 0) {
+        pointSearchSurfInd1[i] = idx;
+        pointSearchSurfInd2[i] = minPointInd2;
+        pointSearchSurfInd3[i] = minPointInd3;
 
+        if (pointSearchSurfInd2[i] >= 0 && pointSearchSurfInd3[i] >= 0) {
             auto tripod1 = cloud_last_surf_->points[pointSearchSurfInd1[i]];
             auto tripod2 = cloud_last_surf_->points[pointSearchSurfInd2[i]];
             auto tripod3 = cloud_last_surf_->points[pointSearchSurfInd3[i]];
@@ -896,8 +859,7 @@ void find_corresponding_surf_features(int iterCount) {
     }
 }
 
-bool calculateTransformationSurf(int iterCount) {
-
+bool FeatureAssociation::calculate_suf_transformation(int iterCount) {
     int pointSelNum = cloud_ori_->points.size();
 
     cv::Mat matA(pointSelNum, 3, CV_32F, cv::Scalar::all(0));
@@ -1004,8 +966,7 @@ bool calculateTransformationSurf(int iterCount) {
     return true;
 }
 
-bool calculateTransformationCorner(int iterCount) {
-
+bool FeatureAssociation::calculate_corner_transformation(int iterCount) {
     int pointSelNum = cloud_ori_->points.size();
 
     cv::Mat matA(pointSelNum, 3, CV_32F, cv::Scalar::all(0));
@@ -1105,8 +1066,7 @@ bool calculateTransformationCorner(int iterCount) {
     return true;
 }
 
-bool calculateTransformation(int iterCount) {
-
+bool FeatureAssociation::calculate_transformation(int iterCount) {
     int pointSelNum = cloud_ori_->points.size();
 
     cv::Mat matA(pointSelNum, 6, CV_32F, cv::Scalar::all(0));
@@ -1137,7 +1097,6 @@ bool calculateTransformation(int iterCount) {
     float c7 = b2; float c8 = -b1; float c9 = tx*-b2 - ty*-b1;
 
     for (int i = 0; i < pointSelNum; i++) {
-
         const auto &p = cloud_ori_->points[i];
         const auto &coeff = coeff_sel_->points[i];
 
@@ -1230,58 +1189,46 @@ bool calculateTransformation(int iterCount) {
     return true;
 }
 
-void check_system_initialization() {
+void FeatureAssociation::check_system_initialization() {
     corner_less_sharp_cloud_.swap(cloud_last_corner_);
     surf_less_flat_cloud_.swap(cloud_last_surf_);
 
     kdtree_last_corner_->setInputCloud(cloud_last_corner_);
     kdtree_last_surf_->setInputCloud(cloud_last_surf_);
 
-    sensor_msgs::PointCloud2 laserCloudCornerLast2;
-    pcl::toROSMsg(*cloud_last_corner_, laserCloudCornerLast2);
-    laserCloudCornerLast2.header.stamp = cloud_header_.stamp;
-    laserCloudCornerLast2.header.frame_id = "camera";
-    pub_last_corner_cloud_.publish(laserCloudCornerLast2);
+    sensor_msgs::PointCloud2 laser_cloud_temp;
 
-    sensor_msgs::PointCloud2 laserCloudSurfLast2;
-    pcl::toROSMsg(*cloud_last_surf_, laserCloudSurfLast2);
-    laserCloudSurfLast2.header.stamp = cloud_header_.stamp;
-    laserCloudSurfLast2.header.frame_id = "camera";
-    pub_last_surf_cloud_.publish(laserCloudSurfLast2);
+    pcl::toROSMsg(*cloud_last_corner_, laser_cloud_temp);
+    laser_cloud_temp.header.stamp = cloud_header_.stamp;
+    laser_cloud_temp.header.frame_id = "camera";
+    pub_last_corner_cloud_.publish(laser_cloud_temp);
+
+    pcl::toROSMsg(*cloud_last_surf_, laser_cloud_temp);
+    laser_cloud_temp.header.stamp = cloud_header_.stamp;
+    laser_cloud_temp.header.frame_id = "camera";
+    pub_last_surf_cloud_.publish(laser_cloud_temp);
 
     transform_sum_[0] += imu_cache.pitch_start;
     transform_sum_[2] += imu_cache.roll_start;
 
-    systemInitedLM = true;
+    is_system_inited_ = true;
 }
 
-void update_initial_guess() {
-    imu_cache.imuPitchLast = imu_cache.pitch_current;
-    imu_cache.imuYawLast = imu_cache.yaw_current;
-    imu_cache.imuRollLast = imu_cache.roll_current;
-
-    imu_cache.imuShiftFromStartX = imu_cache.drift_from_start_to_current_x;
-    imu_cache.imuShiftFromStartY = imu_cache.drift_from_start_to_current_y;
-    imu_cache.imuShiftFromStartZ = imu_cache.drift_from_start_to_current_z;
-
-    imu_cache.imuVeloFromStartX = imu_cache.vel_diff_from_start_to_current_x;
-    imu_cache.imuVeloFromStartY = imu_cache.vel_diff_from_start_to_current_y;
-    imu_cache.imuVeloFromStartZ = imu_cache.vel_diff_from_start_to_current_z;
-
-    if (imu_cache.imuAngularFromStartX != 0 || imu_cache.imuAngularFromStartY != 0 || imu_cache.imuAngularFromStartZ != 0) {
-        transformCur[0] = - imu_cache.imuAngularFromStartY;
-        transformCur[1] = - imu_cache.imuAngularFromStartZ;
-        transformCur[2] = - imu_cache.imuAngularFromStartX;
+void FeatureAssociation::update_initial_guess() {
+    if (imu_cache.angular_diff_from_start_to_current_x != 0 || imu_cache.angular_diff_from_start_to_current_y != 0 || imu_cache.angular_diff_from_start_to_current_z != 0) {
+        transformCur[0] = -imu_cache.angular_diff_from_start_to_current_y;
+        transformCur[1] = -imu_cache.angular_diff_from_start_to_current_z;
+        transformCur[2] = -imu_cache.angular_diff_from_start_to_current_x;
     }
     
-    if (imu_cache.imuVeloFromStartX != 0 || imu_cache.imuVeloFromStartY != 0 || imu_cache.imuVeloFromStartZ != 0) {
-        transformCur[3] -= imu_cache.imuVeloFromStartX * scanPeriod;
-        transformCur[4] -= imu_cache.imuVeloFromStartY * scanPeriod;
-        transformCur[5] -= imu_cache.imuVeloFromStartZ * scanPeriod;
+    if (imu_cache.vel_diff_from_start_to_current_x != 0 || imu_cache.vel_diff_from_start_to_current_y != 0 || imu_cache.vel_diff_from_start_to_current_z != 0) {
+        transformCur[3] -= imu_cache.vel_diff_from_start_to_current_x * scanPeriod;
+        transformCur[4] -= imu_cache.vel_diff_from_start_to_current_y * scanPeriod;
+        transformCur[5] -= imu_cache.vel_diff_from_start_to_current_z * scanPeriod;
     }
 }
 
-void update_transformation() {
+void FeatureAssociation::update_transformation() {
     if (cloud_last_corner_->points.size() < 10 || cloud_last_surf_->points.size() < 100)
         return;
 
@@ -1293,12 +1240,11 @@ void update_transformation() {
 
         if (cloud_ori_->points.size() < 10)
             continue;
-        if (calculateTransformationSurf(iterCount1) == false)
+        if (calculate_suf_transformation(iterCount1) == false)
             break;
     }
 
     for (int iterCount2 = 0; iterCount2 < 25; iterCount2++) {
-
         cloud_ori_->clear();
         coeff_sel_->clear();
 
@@ -1306,42 +1252,38 @@ void update_transformation() {
 
         if (cloud_ori_->points.size() < 10)
             continue;
-        if (calculateTransformationCorner(iterCount2) == false)
+        if (calculate_corner_transformation(iterCount2) == false)
             break;
     }
 }
 
-void integrate_transformation() {
-    float rx, ry, rz, tx, ty, tz;
+void FeatureAssociation::integrate_transformation() {
+    float rx, ry, rz;
     accumulate_rotation(transform_sum_[0], transform_sum_[1], transform_sum_[2], 
                         -transformCur[0], -transformCur[1], -transformCur[2], rx, ry, rz);
 
-    float x1 = std::cos(rz) * (transformCur[3] - imu_cache.imuShiftFromStartX) 
-                - std::sin(rz) * (transformCur[4] - imu_cache.imuShiftFromStartY);
-    float y1 = std::sin(rz) * (transformCur[3] - imu_cache.imuShiftFromStartX) 
-                + std::cos(rz) * (transformCur[4] - imu_cache.imuShiftFromStartY);
-    float z1 = transformCur[5] - imu_cache.imuShiftFromStartZ;
+    auto r = rotate_by_zxy(transformCur[3] - imu_cache.drift_from_start_to_current_x,
+                           transformCur[4] - imu_cache.drift_from_start_to_current_y,
+                           transformCur[5] - imu_cache.drift_from_start_to_current_z,
+                           std::cos(rx), std::sin(rx),
+                           std::cos(ry), std::sin(ry),
+                           std::cos(rz), std::sin(rz));
 
-    float x2 = x1;
-    float y2 = std::cos(rx) * y1 - std::sin(rx) * z1;
-    float z2 = std::sin(rx) * y1 + std::cos(rx) * z1;
-
-    tx = transform_sum_[3] - (std::cos(ry) * x2 + std::sin(ry) * z2);
-    ty = transform_sum_[4] - y2;
-    tz = transform_sum_[5] - (-std::sin(ry) * x2 + std::cos(ry) * z2);
-
-    plugin_imu_rotation(rx, ry, rz, pitch_start, yaw_start, roll_start, 
-                        imuPitchLast, imuYawLast, imuRollLast, rx, ry, rz);
+    plugin_imu_rotation(rx, ry, rz, imu_cache.pitch_start, imu_cache.yaw_start, imu_cache.roll_start, 
+                        imu_cache.pitch_current,
+                        imu_cache.yaw_current,
+                        imu_cache.roll_current,
+                        rx, ry, rz);
 
     transform_sum_[0] = rx;
     transform_sum_[1] = ry;
     transform_sum_[2] = rz;
-    transform_sum_[3] = tx;
-    transform_sum_[4] = ty;
-    transform_sum_[5] = tz;
+    transform_sum_[3] -= r[0];
+    transform_sum_[4] -= r[1];
+    transform_sum_[5] -= r[2];
 }
 
-void publish_odometry() {
+void FeatureAssociation::publish_odometry() {
     geometry_msgs::Quaternion geoQuat = tf::createQuaternionMsgFromRollPitchYaw(transform_sum_[2], -transform_sum_[0], -transform_sum_[1]);
 
     laser_odometry_.header.stamp = cloud_header_.stamp;
@@ -1360,7 +1302,7 @@ void publish_odometry() {
     tf_broadcaster_.sendTransform(laser_odometry_trans_);
 }
 
-void adjust_outlier_cloud() {
+void FeatureAssociation::adjust_outlier_cloud() {
     for (auto &p : projected_outlier_cloud_->points)
     {
         std::array<float, 3> tmp = {p.x, p.y, p.z};
@@ -1370,8 +1312,8 @@ void adjust_outlier_cloud() {
     }
 }
 
-void publish_cloud_last() {
-    updateImuRollPitchYawStartSinCos();
+void FeatureAssociation::publish_cloud_last() {
+    update_imu_rotation_start_sin_cos();
 
     for (auto &p : corner_less_sharp_cloud_->points) {
         transform_to_end(p);
@@ -1389,32 +1331,30 @@ void publish_cloud_last() {
     }
 
     frame_count_++;
-
     if (frame_count_ >= skip_frame_num_ + 1) {
         frame_count_ = 0;
-
         adjust_outlier_cloud();
-        sensor_msgs::PointCloud2 outlierCloudLast2;
-        pcl::toROSMsg(*projected_outlier_cloud_, outlierCloudLast2);
-        outlierCloudLast2.header.stamp = cloud_header_.stamp;
-        outlierCloudLast2.header.frame_id = "camera";
-        pub_last_outlier_cloud_.publish(outlierCloudLast2);
 
-        sensor_msgs::PointCloud2 laserCloudCornerLast2;
-        pcl::toROSMsg(*cloud_last_corner_, laserCloudCornerLast2);
-        laserCloudCornerLast2.header.stamp = cloud_header_.stamp;
-        laserCloudCornerLast2.header.frame_id = "camera";
-        pub_last_corner_cloud_.publish(laserCloudCornerLast2);
+        sensor_msgs::PointCloud2 laser_cloud_temp;
 
-        sensor_msgs::PointCloud2 laserCloudSurfLast2;
-        pcl::toROSMsg(*cloud_last_surf_, laserCloudSurfLast2);
-        laserCloudSurfLast2.header.stamp = cloud_header_.stamp;
-        laserCloudSurfLast2.header.frame_id = "camera";
-        pub_last_surf_cloud_.publish(laserCloudSurfLast2);
+        pcl::toROSMsg(*projected_outlier_cloud_, laser_cloud_temp);
+        laser_cloud_temp.header.stamp = cloud_header_.stamp;
+        laser_cloud_temp.header.frame_id = "camera";
+        pub_last_outlier_cloud_.publish(laser_cloud_temp);
+
+        pcl::toROSMsg(*cloud_last_corner_, laser_cloud_temp);
+        laser_cloud_temp.header.stamp = cloud_header_.stamp;
+        laser_cloud_temp.header.frame_id = "camera";
+        pub_last_corner_cloud_.publish(laser_cloud_temp);
+
+        pcl::toROSMsg(*cloud_last_surf_, laser_cloud_temp);
+        laser_cloud_temp.header.stamp = cloud_header_.stamp;
+        laser_cloud_temp.header.frame_id = "camera";
+        pub_last_surf_cloud_.publish(laser_cloud_temp);
     }
 }
 
-void run()
+void FeatureAssociation::run()
 {
     if (has_get_cloud_ && has_get_cloud_msg_ && has_get_outlier_cloud_ &&
         std::abs(segment_cloud_info_time_ - segment_cloud_time_) < 0.05 &&
@@ -1440,7 +1380,7 @@ void run()
     /**
     2. Feature Association
     */
-    if (!systemInitedLM) {
+    if (!is_system_inited_) {
         check_system_initialization();
         return;
     }
