@@ -8,14 +8,14 @@ static int index_in_project_cloud(int row, int col) {
 ImageProjection::ImageProjection(): nh_("~") {
     sub_laser_cloud_ = nh_.subscribe<sensor_msgs::PointCloud2>(pointCloudTopic, 1, &ImageProjection::cloud_handler, this);
 
-    pub_projected_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/full_cloud_projected", 1);
-    pub_projected_cloud_with_intensity_ = nh_.advertise<sensor_msgs::PointCloud2> ("/full_cloud_info", 1);
+    pub_projected_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/full_cloud_projected", 1);
+    pub_projected_cloud_with_intensity_ = nh_.advertise<sensor_msgs::PointCloud2>("/full_cloud_info", 1);
 
-    pub_pure_ground_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/ground_cloud", 1);
-    pub_ground_segment_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud", 1);
-    pub_pure_segmented_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud_pure", 1);
-    pub_segmented_cloud_info_ = nh_.advertise<cloud_msgs::cloud_info> ("/segmented_cloud_info", 1);
-    pub_outlier_cloud_ = nh_.advertise<sensor_msgs::PointCloud2> ("/outlier_cloud", 1);
+    pub_pure_ground_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/ground_cloud", 1);
+    pub_ground_segment_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/segmented_cloud", 1);
+    pub_pure_segmented_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/segmented_cloud_pure", 1);
+    pub_segmented_cloud_info_ = nh_.advertise<cloud_msgs::cloud_info>("/segmented_cloud_info", 1);
+    pub_outlier_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/outlier_cloud", 1);
 
     init_point_value_.x = std::numeric_limits<float>::quiet_NaN();
     init_point_value_.y = std::numeric_limits<float>::quiet_NaN();
@@ -34,18 +34,18 @@ ImageProjection::ImageProjection(): nh_("~") {
 void ImageProjection::allocate_memory() {
     const int points_num = N_SCAN*Horizon_SCAN;
 
-    laser_cloud_input_.reset(new pcl::PointCloud<PointType>);
+    laser_cloud_input_.reset(new pcl::PointCloud<Point>);
 
-    projected_laser_cloud_.reset(new pcl::PointCloud<PointType>);
+    projected_laser_cloud_.reset(new pcl::PointCloud<Point>);
     projected_laser_cloud_->points.assign(init_point_value_, points_num);
 
-    projected_laser_cloud_with_intensity_.reset(new pcl::PointCloud<PointType>);
+    projected_laser_cloud_with_intensity_.reset(new pcl::PointCloud<Point>);
     projected_laser_cloud_with_intensity_->points.assign(init_point_value_, points_num);
 
-    projected_ground_cloud_.reset(new pcl::PointCloud<PointType>);
-    projected_ground_segment_cloud_.reset(new pcl::PointCloud<PointType>);
-    projected_pure_segmented_cloud_.reset(new pcl::PointCloud<PointType>);
-    projected_outlier_cloud_.reset(new pcl::PointCloud<PointType>);
+    projected_ground_cloud_.reset(new pcl::PointCloud<Point>);
+    projected_ground_segment_cloud_.reset(new pcl::PointCloud<Point>);
+    projected_pure_segmented_cloud_.reset(new pcl::PointCloud<Point>);
+    projected_outlier_cloud_.reset(new pcl::PointCloud<Point>);
 
     segmented_cloud_msg_.ring_index_start.assign(N_SCAN, 0);
     segmented_cloud_msg_.ring_index_end.assign(N_SCAN, 0);
@@ -136,7 +136,7 @@ void ImageProjection::calculate_orientation() {
     segmented_cloud_msg_.orientation_diff = segmented_cloud_msg_.orientation_end - segmented_cloud_msg_.orientation_start;
 }
 
-int ImageProjection::point_row(const PointType &p, int idx) const {
+int ImageProjection::point_row(const Point &p, int idx) const {
     if (useCloudRing == true)
         return laser_cloud_ring_[idx];
 
@@ -144,7 +144,7 @@ int ImageProjection::point_row(const PointType &p, int idx) const {
     return (vertical_angle + ang_bottom) / laser_resolution_vertical;
 }
 
-int ImageProjection::point_column(const PointType &p) const {
+int ImageProjection::point_column(const Point &p) const {
     float horizon_angle = std::atan2(p.x, p.y) * 180 / M_PI;
     int column = -round((horizon_angle - 90.0) / laser_resolution_horizon) + Horizon_SCAN / 2;
     if (column >= Horizon_SCAN)
@@ -286,7 +286,6 @@ void ImageProjection::bfs_cluster(int row, int col) {
     struct Queue
     {
         int cluster_size = 0;
-        int size = 0;
         int start = 0;
         int end = 0;
 
@@ -298,16 +297,14 @@ void ImageProjection::bfs_cluster(int row, int col) {
     static struct Queue queue;
     queue.elements[0].row = row;
     queue.elements[0].col = col;
-    queue.size = 1;
     queue.start = 0;
     queue.end = 1;
     queue.cluster_size = queue.end;
 
-    while (queue.size > 0) {
+    while (queue.end - queue.start > 0) {
         int current_row = queue.element[start].row;
         int current_col = queue.element[start].col;
-        --queue.size;
-        ++queue.start;
+        ++queue.start;   // pop front
 
         int idx = index_in_project_cloud(current_row, current_col);
         point_label_[idx] = ImageProjection::PointLabel::segmentation;
@@ -334,9 +331,9 @@ void ImageProjection::bfs_cluster(int row, int col) {
                             projected_cloud_range_.at<float>(neibor_row, neibor_col));
 
             float alpha = 0.f;
-            if (e.first == 0)
+            if (e.first == 0) // row
                 alpha = segmentAlphaX;
-            else
+            else // column
                 alpha = segmentAlphaY;
             float angle = std::atan2(distance.first * std::sin(alpha), (distance.second - distance.first * std::cos(alpha)));
 
@@ -345,7 +342,6 @@ void ImageProjection::bfs_cluster(int row, int col) {
                 queue.element[end].col = neibor_col;
 
                 queue.cluster_size = queue.end;
-                ++queue.size;
                 ++queue.end;
 
                 cross_scan_flag[neibor_row] = true;
@@ -370,7 +366,6 @@ void ImageProjection::bfs_cluster(int row, int col) {
         }
     }
     std::fill(cross_scan_flag, cross_scan_flag + N_SCAN, false);
-
     // segmentation_cluster_id_ as unordered_map, may get low performance
 }
 

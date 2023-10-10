@@ -44,8 +44,8 @@ public:
 private:
     void init();
 
-    void transform_to_start(PointType const * const pi, PointType * const po);
-    void transform_to_end(PointType const * const pi, PointType * const po);
+    Point transform_to_start(const Point &p) const;
+    void transform_to_end(Point &p)
 
     void plugin_imu_rotation(float bcx, float bcy, float bcz, float blx, float bly, float blz, 
                            float alx, float aly, float alz, float &acx, float &acy, float &acz);
@@ -74,7 +74,7 @@ private:
 
     void adjust_outlier_cloud(); 
 
-    void publishCloudsLast();
+    void publish_cloud_last();
 
     void updateImuRollPitchYawStartSinCos() ;
 
@@ -82,7 +82,7 @@ private:
 
     void vel_to_start_imu();
 
-    void transform_to_start_imu(PointType &p);
+    void transform_to_start_imu(Point &p);
 
     void accumulate_imu_shift_rotation();
 
@@ -112,23 +112,23 @@ private:
     ros::Subscriber sub_outlier_cloud_;
     ros::Subscriber sub_imu_;
 
-    ros::Publisher pub_corner_sharp;
-    ros::Publisher pub_corner_less_sharp;
-    ros::Publisher pub_surf_flat;
-    ros::Publisher pub_surf_less_sharp;
+    ros::Publisher pub_corner_sharp_;
+    ros::Publisher pub_corner_less_sharp_;
+    ros::Publisher pub_surf_flat_;
+    ros::Publisher pub_surf_less_flat_;
 
-    pcl::PointCloud<PointType>::Ptr projected_ground_segment_cloud_;
-    pcl::PointCloud<PointType>::Ptr projected_outlier_cloud_;
+    pcl::PointCloud<Point>::Ptr projected_ground_segment_cloud_;
+    pcl::PointCloud<Point>::Ptr projected_outlier_cloud_;
 
-    pcl::PointCloud<PointType>::Ptr corner_sharp_cloud_;
-    pcl::PointCloud<PointType>::Ptr corner_less_sharp_cloud_;
-    pcl::PointCloud<PointType>::Ptr surf_flat_cloud_;
-    pcl::PointCloud<PointType>::Ptr surf_less_flat_cloud_;
+    pcl::PointCloud<Point>::Ptr corner_sharp_cloud_;
+    pcl::PointCloud<Point>::Ptr corner_less_sharp_cloud_;
+    pcl::PointCloud<Point>::Ptr surf_flat_cloud_;
+    pcl::PointCloud<Point>::Ptr surf_less_flat_cloud_;
 
-    pcl::PointCloud<PointType>::Ptr surfPointsLessFlatScan;
-    pcl::PointCloud<PointType>::Ptr surfPointsLessFlatScanDS;
+    pcl::PointCloud<Point>::Ptr surf_less_flat_scan_;
+    pcl::PointCloud<Point>::Ptr surf_less_flat_scan_ds_;
 
-    pcl::VoxelGrid<PointType> voxel_grid_filter_;
+    pcl::VoxelGrid<Point> voxel_grid_filter_;
 
     double laser_scan_time_ = 0;
     double segment_cloud_time_ = 0;
@@ -180,7 +180,7 @@ private:
     };
     struct Imu
     {
-        int after_laser_idx = 0;
+        int after_laser_idx = 0; // first imu newer than laser frame
         int newest_idx = -1;
 
         int newest_idxIteration = 0;
@@ -224,7 +224,7 @@ private:
         float vel_diff_from_start_to_current_y = 0.f;
         float vel_diff_from_start_to_current_z = 0.f;
 
-        float imuAngularRotationXCur, imuAngularRotationYCur, imuAngularRotationZCur;
+        float angular_rotation_current_x, angular_rotation_current_y, angular_rotation_current_z;
         float imuAngularRotationXLast, imuAngularRotationYLast, imuAngularRotationZLast;
         float imuAngularFromStartX, imuAngularFromStartY, imuAngularFromStartZ;
 
@@ -252,34 +252,32 @@ private:
     ros::Publisher pub_last_outlier_cloud_;
 
     int skip_frame_num_ = 1;
-    bool systemInitedLM;
+    bool systemInitedLM = false;
 
-    int *pointSelCornerInd;
     float *pointSearchCornerInd1;
     float *pointSearchCornerInd2;
 
-    int *pointSelSurfInd;
     float *pointSearchSurfInd1;
     float *pointSearchSurfInd2;
     float *pointSearchSurfInd3;
 
     float transformCur[6];
-    float transformSum[6];
+    float transform_sum_[6];
 
-    pcl::PointCloud<PointType>::Ptr cloud_last_corner_;
-    pcl::PointCloud<PointType>::Ptr cloud_last_surf_;
-    pcl::PointCloud<PointType>::Ptr laserCloudOri;
-    pcl::PointCloud<PointType>::Ptr coeff_sel_;
+    pcl::PointCloud<Point>::Ptr cloud_last_corner_;
+    pcl::PointCloud<Point>::Ptr cloud_last_surf_;
+    pcl::PointCloud<Point>::Ptr cloud_ori_;
+    pcl::PointCloud<Point>::Ptr coeff_sel_;
 
-    pcl::KdTreeFLANN<PointType>::Ptr kdtree_last_corner_;
-    pcl::KdTreeFLANN<PointType>::Ptr kdtree_last_surf_;
+    pcl::KdTreeFLANN<Point>::Ptr kdtree_last_corner_;
+    pcl::KdTreeFLANN<Point>::Ptr kdtree_last_surf_;
 
     nav_msgs::Odometry laser_odometry_;
 
     tf::TransformBroadcaster tf_broadcaster_;
     tf::StampedTransform laser_odometry_trans_;
 
-    bool is_degenerate_;
+    bool is_degenerate_ = false;
     cv::Mat mat_p_;
 
     int frame_count_ = 1;

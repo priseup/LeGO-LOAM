@@ -68,8 +68,8 @@ private:
 
     void bfs_cluster(int row, int col);
 
-    int point_row() const;
-    int point_column() const;
+    int point_row(const Point &p, int idx) const;
+    int point_column(const Point &p) const;
 
 private:
 enum class PointLabel {
@@ -94,21 +94,21 @@ private:
     ros::Publisher pub_segmented_cloud_info_;
     ros::Publisher pub_outlier_cloud_;
 
-    pcl::PointCloud<PointType>::Ptr laser_cloud_input_;
+    pcl::PointCloud<Point>::Ptr laser_cloud_input_;
     std::vector<int> laser_cloud_ring_;
 
-    pcl::PointCloud<PointType>::Ptr projected_laser_cloud_; // projected velodyne raw cloud, but saved in the form of 1-D matrix
-    pcl::PointCloud<PointType>::Ptr projected_laser_cloud_with_intensity_; // same as projected_laser_cloud_, but with intensity  range
+    pcl::PointCloud<Point>::Ptr projected_laser_cloud_; // projected velodyne raw cloud, but saved in the form of 1-D matrix
+    pcl::PointCloud<Point>::Ptr projected_laser_cloud_with_intensity_; // same as projected_laser_cloud_, but with intensity  range
 
-    pcl::PointCloud<PointType>::Ptr projected_pure_ground_cloud_;
-    pcl::PointCloud<PointType>::Ptr projected_ground_segment_cloud_;
-    pcl::PointCloud<PointType>::Ptr projected_pure_segmented_cloud_;
-    pcl::PointCloud<PointType>::Ptr projected_outlier_cloud_;
+    pcl::PointCloud<Point>::Ptr projected_pure_ground_cloud_;
+    pcl::PointCloud<Point>::Ptr projected_ground_segment_cloud_;
+    pcl::PointCloud<Point>::Ptr projected_pure_segmented_cloud_;
+    pcl::PointCloud<Point>::Ptr projected_outlier_cloud_;
 
     std::vector<PointLabel> point_label_;
     std::unordered_map<int, int> segmentation_cluster_id_; // can be replaced by std::vector<int> if unordered_map has low performance
 
-    PointType init_point_value_; // fill in projected_laser_cloud_ at each iteration
+    Point init_point_value_; // fill in projected_laser_cloud_ at each iteration
 
     cv::Mat projected_cloud_range_; // range matrix for range image
     cv::Mat projected_cloud_label_; // label matrix for segmentaiton marking

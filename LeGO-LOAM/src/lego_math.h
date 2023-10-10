@@ -37,6 +37,8 @@
 #include "utility.h"
 #include <array>
 
+#define PI 3.14159265
+
 double rad2deg(double radian) {
     return radian * 180.0 / M_PI;
 }
@@ -45,9 +47,9 @@ double deg2rad(double degree) {
     return degree * M_PI / 180.0;
 }
 
-double square_distance(const PointType &p0, const PointType &p1);
-double distance(const PointType &p0, const PointType &p1);
-double range(const PointType &p0);
+double square_distance(const Point &p0, const Point &p1);
+double distance(const Point &p0, const Point &p1);
+double range(const Point &p0);
 
 float shift_distance_by_vel(const float &vel, const float &time);
 float shift_distance_by_acc(const float &acc, const float &time);

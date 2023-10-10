@@ -1,15 +1,6 @@
+#include <cmath>
 #include "utility.h"
 #include "lego_math.h"
-
-namespace {
-double rad2deg(double radian) {
-    return radian * 180.0 / M_PI;
-}
-
-double deg2rad(double degree) {
-    return degree * M_PI / 180.0;
-}
-}
 
 FeatureAssociation::FeatureAssociation(): nh_("~") {
     sub_laser_cloud_ = nh_.subscribe<sensor_msgs::PointCloud2>("/segmented_cloud", 1, &FeatureAssociation::laser_cloud_handler, this);
@@ -17,23 +8,23 @@ FeatureAssociation::FeatureAssociation(): nh_("~") {
     sub_outlier_cloud_ = nh_.subscribe<sensor_msgs::PointCloud2>("/outlier_cloud", 1, &FeatureAssociation::outlier_cloud_handler, this);
     sub_imu_ = nh_.subscribe<sensor_msgs::Imu>(imuTopic, 50, &FeatureAssociation::imu_handler, this);
 
-    pub_corner_sharp = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_sharp", 1);
-    pub_corner_less_sharp = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_less_sharp", 1);
-    pub_surf_flat = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_flat", 1);
-    pub_surf_less_sharp = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_less_flat", 1);
+    pub_corner_sharp_ = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_sharp", 1);
+    pub_corner_less_sharp_ = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_less_sharp", 1);
+    pub_surf_flat_ = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_flat", 1);
+    pub_surf_less_flat_ = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_less_flat", 1);
 
     pub_last_corner_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_corner_last", 2);
     pub_last_surf_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_surf_last", 2);
     pub_last_outlier_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/outlier_cloud_last", 2);
     pub_laser_odometry_ = nh_.advertise<nav_msgs::Odometry> ("/laser_odom_to_init", 5);
 
-    cloud_last_corner_.reset(new pcl::PointCloud<PointType>);
-    cloud_last_surf_.reset(new pcl::PointCloud<PointType>);
-    laserCloudOri.reset(new pcl::PointCloud<PointType>);
-    coeff_sel_.reset(new pcl::PointCloud<PointType>);
+    cloud_last_corner_.reset(new pcl::PointCloud<Point>);
+    cloud_last_surf_.reset(new pcl::PointCloud<Point>);
+    cloud_ori_.reset(new pcl::PointCloud<Point>);
+    coeff_sel_.reset(new pcl::PointCloud<Point>);
 
-    kdtree_last_corner_.reset(new pcl::KdTreeFLANN<PointType>);
-    kdtree_last_surf_.reset(new pcl::KdTreeFLANN<PointType>);
+    kdtree_last_corner_.reset(new pcl::KdTreeFLANN<Point>);
+    kdtree_last_surf_.reset(new pcl::KdTreeFLANN<Point>);
 
     laser_odometry_.header.frame_id = "camera_init";
     laser_odometry_.child_frame_id = "laser_odom";
@@ -41,33 +32,31 @@ FeatureAssociation::FeatureAssociation(): nh_("~") {
     laser_odometry_trans_.frame_id_ = "camera_init";
     laser_odometry_trans_.child_frame_id_ = "laser_odom";
     
-    projected_ground_segment_cloud_.reset(new pcl::PointCloud<PointType>);
-    projected_outlier_cloud_.reset(new pcl::PointCloud<PointType>);
+    projected_ground_segment_cloud_.reset(new pcl::PointCloud<Point>);
+    projected_outlier_cloud_.reset(new pcl::PointCloud<Point>);
 
-    corner_sharp_cloud_.reset(new pcl::PointCloud<PointType>);
-    corner_less_sharp_cloud_.reset(new pcl::PointCloud<PointType>);
-    surf_flat_cloud_.reset(new pcl::PointCloud<PointType>);
-    surf_less_flat_cloud_.reset(new pcl::PointCloud<PointType>);
+    corner_sharp_cloud_.reset(new pcl::PointCloud<Point>);
+    corner_less_sharp_cloud_.reset(new pcl::PointCloud<Point>);
+    surf_flat_cloud_.reset(new pcl::PointCloud<Point>);
+    surf_less_flat_cloud_.reset(new pcl::PointCloud<Point>);
 
-    surfPointsLessFlatScan.reset(new pcl::PointCloud<PointType>);
-    surfPointsLessFlatScanDS.reset(new pcl::PointCloud<PointType>);
+    surf_less_flat_scan_.reset(new pcl::PointCloud<Point>);
+    surf_less_flat_scan_ds_.reset(new pcl::PointCloud<Point>);
 
     init();
 }
 
 void init()
 {
-    const int points_num = N_SCAN*Horizon_SCAN;
+    const int points_num = N_SCAN * Horizon_SCAN;
 
     cloud_curvature_ = new float[points_num];
     cloudNeighborPicked = new int[points_num];
     cloud_label_ = new int[points_num];
 
-    pointSelCornerInd = new int[points_num];
     pointSearchCornerInd1 = new float[points_num];
     pointSearchCornerInd2 = new float[points_num];
 
-    pointSelSurfInd = new int[points_num];
     pointSearchSurfInd1 = new float[points_num];
     pointSearchSurfInd2 = new float[points_num];
     pointSearchSurfInd3 = new float[points_num];
@@ -76,19 +65,12 @@ void init()
 
     voxel_grid_filter_.setLeafSize(0.2, 0.2, 0.2);
 
-    skip_frame_num_ = 1;
-
     for (int i = 0; i < 6; ++i) {
         transformCur[i] = 0;
-        transformSum[i] = 0;
+        transform_sum_[i] = 0;
     }
 
-    systemInitedLM = false;
-
-    is_degenerate_ = false;
     mat_p_ = cv::Mat(6, 6, CV_32F, cv::Scalar::all(0));
-
-    frame_count_ = skip_frame_num_;
 }
 
 void updateImuRollPitchYawStartSinCos() {
@@ -106,25 +88,19 @@ void shift_to_start_imu(float point_time)
     imu_cache.drift_from_start_to_current_y = imu_cache.shift_current_y - imu_cache.shift_start_y - imu_cache.vel_start_y * point_time;
     imu_cache.drift_from_start_to_current_z = imu_cache.shift_current_z - imu_cache.shift_start_z - imu_cache.vel_start_z * point_time;
 
-    // due to x, y, z--->y, z, x
-    // roll, pitch, yaw--->pitch, yaw, roll
-    auto r0 = rotate_by_y_axis(imu_cahce.drift_from_start_to_current_x,
-                                  imu_cahce.drift_from_start_to_current_y,
-                                  imu_cahce.drift_from_start_to_current_z,
-                                  imu_cache.yaw_start_cos,
-                                  -imu_cache.yaw_start_sin);
-
-    auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2],
-                            imu_cache.pitch_start_cos,
-                            -imu_cache.pitch_start_sin);
-
-    auto r2 = rotate_by_z_axis(r1[0], r1[1], r1[2],
+    auto r0 = rotate_by_yxz_(imu_cache.drift_from_start_to_current_x,
+                            imu_cache.drift_from_start_to_current_y,
+                            imu_cache.drift_from_start_to_current_z,
                             imu_cache.roll_start_cos,
-                            -imu_cache.roll_start_sin);
+                            -imu_cache.roll_start_sin,
+                            imu_cache.pitch_start_cos,
+                            -imu_cache.pitch_start_sin,
+                            imu_cache.yaw_start_cos,
+                            -imu_cache.yaw_start_sin);
 
-    imu_cache.drift_from_start_to_current_x = r2[0];
-    imu_cache.drift_from_start_to_current_y = r2[1];
-    imu_cache.drift_from_start_to_current_z = r2[2];
+    imu_cache.drift_from_start_to_current_x = r0[0];
+    imu_cache.drift_from_start_to_current_y = r0[1];
+    imu_cache.drift_from_start_to_current_z = r0[2];
 }
 
 void vel_to_start_imu()
@@ -133,38 +109,32 @@ void vel_to_start_imu()
     imu_cache.vel_diff_from_start_to_current_y = imu_cache.vel_current_y - imu_cache.vel_start_y;
     imu_cache.vel_diff_from_start_to_current_z = imu_cache.vel_current_z - imu_cache.vel_start_z;
 
-    auto r0 = rotate_by_y_axis(imu_cache.vel_diff_from_start_to_current_x,
+    auto r0 = rotate_by_yxz(imu_cache.vel_diff_from_start_to_current_x,
                                imu_cache.vel_diff_from_start_to_current_y,
                                imu_cache.vel_diff_from_start_to_current_z,
+                               imu_cache.roll_start_cos,
+                               -imu_cache.roll_start_sin,
+                               imu_cache.pitch_start_cos,
+                               -imu_cache.pitch_start_sin,
                                imu_cache.yaw_start_cos,
                                -imu_cache.yaw_start_sin);
 
-    auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2],
-                               imu_cache.pitch_start_cos,
-                               -imu_cache.pitch_start_sin);
-
-    auto r2 = rotate_by_z_axis(r1[0], r1[1], r1[2],
-                               imu_cache.roll_start_cos,
-                               -imu_cache.roll_start_sin);
-
-    imu_cache.vel_diff_from_start_to_current_x = r2[0];
-    imu_cache.vel_diff_from_start_to_current_y = r2[1];
-    imu_cache.vel_diff_from_start_to_current_z = r2[2];
+    imu_cache.vel_diff_from_start_to_current_x = r0[0];
+    imu_cache.vel_diff_from_start_to_current_y = r0[1];
+    imu_cache.vel_diff_from_start_to_current_z = r0[2];
 }
 
-void transform_to_start_imu(PointType &p)
+void transform_to_start_imu(Point &p)
 {
-    auto r0 = rotate_by_z_axis(p.x, p.y, p.z, imu_cahce.roll_current);
-    auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2], imu_cache.pitch_current);
-    auto r2 = rotate_by_y_axis(r1[0], r1[1], r1[2], imu_cache.yaw_current);
+    auto r0 = rotate_by_zxy(p.x, p.y, p.z, imu_cache.roll_current, imu_cache.pitch_current, imu_cache.yaw_current);
+    auto r1 = rotate_by_yxz(r0[0], r0[1], r0[2],
+                            imu_cache.roll_start_cos, -imu_cache.roll_start_sin,
+                            imu_cache.pitch_start_cos, -imu_cache.pitch_start_sin,
+                            imu_cache.yaw_start_cos, -imu_cache.yaw_start_sin);
 
-    auto r3 = rotate_by_y_axis(r2[0], r2[1], r2[2], imu_cache.yaw_start_cos, -imu_cache.yaw_start_sin);
-    auto r4 = rotate_by_x_axis(r3[0], r3[1], r3[2], imu_cache.pitch_start_cos, -imu_cache.pitch_start_sin);
-    auto r5 = rotate_by_z_axis(r4[0], r4[1], r4[2], imu_cache.roll_start_cos, -imu_cache.roll_start_sin);
-
-    p->x = r5[0] + imu_cache.drift_from_start_to_current_x_;
-    p->y = r5[1] + imu_cache.drift_from_start_to_current_y_;
-    p->z = r5[2] + imu_cache.drift_from_start_to_current_z_;
+    p->x = r1[0] + imu_cache.drift_from_start_to_current_x_;
+    p->y = r1[1] + imu_cache.drift_from_start_to_current_y_;
+    p->z = r1[2] + imu_cache.drift_from_start_to_current_z_;
 }
 
 void accumulate_imu_shift_rotation()
@@ -174,18 +144,15 @@ void accumulate_imu_shift_rotation()
 
     double time_diff = imu_new.time - imu_last_new.time;
     if (time_diff < scanPeriod) {
+        auto r0 = rotate_by_zxy(imu_new.acc_x, imu_new.acc_y, imu_new.acc_z, imu_new.roll, imu_new.pitch, imu_new.yaw);
 
-        auto r0 = rotate_by_z_axis(imu_new.acc_x, imu_new.acc_y, imu_new.acc_z, imu_new.roll);
-        auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2], imu_new.pitch);
-        auto r2 = rotate_by_y_axis(r1[0], r1[1], r1[2], imu_new.yaw);
+        imu_new.vel_x = imu_last_new.vel_x + r0[0] * time_diff;
+        imu_new.vel_y = imu_last_new.vel_y + r0[1] * time_diff;
+        imu_new.vel_z = imu_last_new.vel_z + r0[2] * time_diff;
 
-        imu_new.vel_x = imu_last_new.vel_x + r2[0] * time_diff;
-        imu_new.vel_y = imu_last_new.vel_y + r2[1] * time_diff;
-        imu_new.vel_z = imu_last_new.vel_z + r2[2] * time_diff;
-
-        imu_new.shift_x = imu_last_new.shift_x + imu_last_new.vel_x * time_diff + r2[0] * time_diff * time_diff / 2;
-        imu_new.shift_y = imu_last_new.shift_y + imu_last_new.vel_y * time_diff + r2[1] * time_diff * time_diff / 2;
-        imu_new.shift_z = imu_last_new.shift_z + imu_last_new.vel_z * time_diff + r2[2] * time_diff * time_diff / 2;
+        imu_new.shift_x = imu_last_new.shift_x + imu_last_new.vel_x * time_diff + r0[0] * time_diff * time_diff / 2;
+        imu_new.shift_y = imu_last_new.shift_y + imu_last_new.vel_y * time_diff + r0[1] * time_diff * time_diff / 2;
+        imu_new.shift_z = imu_last_new.shift_z + imu_last_new.vel_z * time_diff + r0[2] * time_diff * time_diff / 2;
 
         imu_new.angular_rotation_x = imu_last_new.angular_rotation_x + imu_last_new.angular_vel_x * time_diff;
         imu_new.angular_rotation_y = imu_last_new.angular_rotation_y + imu_last_new.angular_vel_y * time_diff;
@@ -257,7 +224,7 @@ void adjust_distortion() {
         float rx = projected_ground_segment_cloud_->points[i].x;
         float ry = projected_ground_segment_cloud_->points[i].y;
         float rz = projected_ground_segment_cloud_->points[i].z;
-        point.x = rz;
+        point.x = ry;
         point.y = rz;
         point.z = rx;
 
@@ -283,17 +250,16 @@ void adjust_distortion() {
         float laser_point_time = laser_scan_time_ + point_time;
 
         if (imu_cache.newest_idx >= 0) {
-            imu_cahce.after_laser_idx = imu_cahce.newest_idxIteration;
-            while (imu_cahce.after_laser_idx != imu_cache.newest_idx) {
-                if (laser_point_time < imu_cahce.imu_queue[imu_cache.after_laser_idx].time) {
+            imu_cache.after_laser_idx = imu_cache.newest_idxIteration;
+            while (imu_cache.after_laser_idx != imu_cache.newest_idx) {
+                if (laser_point_time < imu_cache.imu_queue[imu_cache.after_laser_idx].time) {
                     break;
                 }
-                imu_cahce.after_laser_idx = imu.idx_increment(imu.after_laser_idx);
+                imu_cache.after_laser_idx = imu.idx_increment(imu.after_laser_idx);
             }
 
-            const auto &imu_after_laser = imu_cache.imu_queue[imu_cahce.after_laser_idx];
+            const auto &imu_after_laser = imu_cache.imu_queue[imu_cache.after_laser_idx];
             if (laser_point_time > imu_after_laser.time) {
-                // imu_cache.after_laser_idx == imu_cache.newest_idx
                 // assign the newest imu to current state
                 imu_cache.roll_current = imu_after_laser.roll;
                 imu_cache.pitch_current = imu_after_laser.pitch;
@@ -345,25 +311,27 @@ void adjust_distortion() {
                 imu_cache.shift_start_z = imu_cache.shift_current_z;
 
                 if (laser_point_time > imu_after_laser.time) {
-                    imuAngularRotationXCur = imu_after_laser.imuAngularRotationX;
-                    imuAngularRotationYCur = imu_after_laser.imuAngularRotationY;
-                    imuAngularRotationZCur = imu_after_laser.imuAngularRotationZ;
+                    imu_cache.angular_rotation_current_x = imu_after_laser.angular_rotation_x;
+                    imu_cache.angular_rotation_current_y = imu_after_laser.angular_rotation_y;
+                    imu_cache.angular_rotation_current_z = imu_after_laser.angular_rotation_z;
                 }else{
-                    int imuPointerBack = (imu_cahce.after_laser_idx + imuQueLength - 1) % imuQueLength;
-                    float ratioFront = (laser_point_time - imuTime[imuPointerBack]) 
-                                                        / (imuTime[imu_cahce.after_laser_idx] - imuTime[imuPointerBack]);
-                    imuAngularRotationXCur = imuAngularRotationX[imu_cahce.after_laser_idx] * ratioFront + imuAngularRotationX[imuPointerBack] * ratioBack;
-                    imuAngularRotationYCur = imuAngularRotationY[imu_cahce.after_laser_idx] * ratioFront + imuAngularRotationY[imuPointerBack] * ratioBack;
-                    imuAngularRotationZCur = imuAngularRotationZ[imu_cahce.after_laser_idx] * ratioFront + imuAngularRotationZ[imuPointerBack] * ratioBack;
+                    int before_laser_idx = imu_cache.idx_decrement(imu_cache.after_laser_idx);
+                    const auto &imu_before_laser = imu_cache.imu_queue[before_laser_idx];
+                    float ratio_from_start = (laser_point_time - imu_before_laser.time) 
+                                            / (imu_after_laser.time - imu_before_laser.time);
+
+                    imu_cache.angular_rotation_current_x = interpolation_by_linear(imu_before_laser.angular_rotation_x, imu_after_laser.angular_rotation_x, ratio_from_start);
+                    imu_cache.angular_rotation_current_y = interpolation_by_linear(imu_before_laser.angular_rotation_y, imu_after_laser.angular_rotation_y, ratio_from_start);
+                    imu_cache.angular_rotation_current_z = interpolation_by_linear(imu_before_laser.angular_rotation_z, imu_after_laser.angular_rotation_z, ratio_from_start);
                 }
 
-                imuAngularFromStartX = imuAngularRotationXCur - imuAngularRotationXLast;
-                imuAngularFromStartY = imuAngularRotationYCur - imuAngularRotationYLast;
-                imuAngularFromStartZ = imuAngularRotationZCur - imuAngularRotationZLast;
+                imu_cache.imuAngularFromStartX = imu_cache.angular_rotation_current_x - imuAngularRotationXLast;
+                imu_cache.imuAngularFromStartY = imu_cache.angular_rotation_current_y - imuAngularRotationYLast;
+                imu_cache.imuAngularFromStartZ = imu_cache.angular_rotation_current_z - imuAngularRotationZLast;
 
-                imuAngularRotationXLast = imuAngularRotationXCur;
-                imuAngularRotationYLast = imuAngularRotationYCur;
-                imuAngularRotationZLast = imuAngularRotationZCur;
+                imu_cache.imuAngularRotationXLast = imu_cache.angular_rotation_current_x;
+                imu_cache.imuAngularRotationYLast = imu_cache.angular_rotation_current_y;
+                imu_cache.imuAngularRotationZLast = imu_cache.angular_rotation_current_z;
 
                 updateImuRollPitchYawStartSinCos();
             } else {
@@ -444,7 +412,7 @@ void extract_features()
     const auto &cloud_column = segmented_cloud_msg_.ground_segment_cloud_column;
 
     for (int i = 0; i < N_SCAN; i++) {
-        surfPointsLessFlatScan->clear();
+        surf_less_flat_scan_->clear();
 
         for (int j = 0; j < 6; j++) {
             int sp = (segmented_cloud_msg_.ring_index_start[i] * (6 - j)  + segmented_cloud_msg_.ring_index_end[i] * j) / 6;
@@ -522,16 +490,16 @@ void extract_features()
 
             for (int k = sp; k <= ep; k++) {
                 if (cloud_label_[k] <= 0) {
-                    surfPointsLessFlatScan->push_back(projected_ground_segment_cloud_->points[k]);
+                    surf_less_flat_scan_->push_back(projected_ground_segment_cloud_->points[k]);
                 }
             }
         }
 
-        surfPointsLessFlatScanDS->clear();
-        voxel_grid_filter_.setInputCloud(surfPointsLessFlatScan);
-        voxel_grid_filter_.filter(*surfPointsLessFlatScanDS);
+        surf_less_flat_scan_ds_->clear();
+        voxel_grid_filter_.setInputCloud(surf_less_flat_scan_);
+        voxel_grid_filter_.filter(*surf_less_flat_scan_ds_);
 
-        *surf_less_flat_cloud_ += *surfPointsLessFlatScanDS;
+        *surf_less_flat_cloud_ += *surf_less_flat_scan_ds_;
     }
 }
 
@@ -539,36 +507,36 @@ void publish_cloud()
 {
     sensor_msgs::PointCloud2 laser_cloud_msg;
 
-    if (pub_corner_sharp.getNumSubscribers() != 0) {
+    if (pub_corner_sharp_.getNumSubscribers() != 0) {
         pcl::toROSMsg(*corner_sharp_cloud_, laser_cloud_msg);
         laser_cloud_msg.header.stamp = cloud_header_.stamp;
         laser_cloud_msg.header.frame_id = "camera";
-        pub_corner_sharp.publish(laser_cloud_msg);
+        pub_corner_sharp_.publish(laser_cloud_msg);
     }
 
-    if (pub_corner_less_sharp.getNumSubscribers() != 0) {
+    if (pub_corner_less_sharp_.getNumSubscribers() != 0) {
         pcl::toROSMsg(*corner_less_sharp_cloud_, laser_cloud_msg);
         laser_cloud_msg.header.stamp = cloud_header_.stamp;
         laser_cloud_msg.header.frame_id = "camera";
-        pub_corner_less_sharp.publish(laser_cloud_msg);
+        pub_corner_less_sharp_.publish(laser_cloud_msg);
     }
 
-    if (pub_surf_flat.getNumSubscribers() != 0) {
+    if (pub_surf_flat_.getNumSubscribers() != 0) {
         pcl::toROSMsg(*surf_flat_cloud_, laser_cloud_msg);
         laser_cloud_msg.header.stamp = cloud_header_.stamp;
         laser_cloud_msg.header.frame_id = "camera";
-        pub_surf_flat.publish(laser_cloud_msg);
+        pub_surf_flat_.publish(laser_cloud_msg);
     }
 
-    if (pub_surf_less_sharp.getNumSubscribers() != 0) {
+    if (pub_surf_less_flat_.getNumSubscribers() != 0) {
         pcl::toROSMsg(*surf_less_flat_cloud_, laser_cloud_msg);
         laser_cloud_msg.header.stamp = cloud_header_.stamp;
         laser_cloud_msg.header.frame_id = "camera";
-        pub_surf_less_sharp.publish(laser_cloud_msg);
+        pub_surf_less_flat_.publish(laser_cloud_msg);
     }
 }
 
-PointType transform_to_start(const PointType &p)
+Point transform_to_start(const Point &p) const
 {
     float s = 10 * (p.intensity - int(p.intensity));
 
@@ -587,7 +555,7 @@ PointType transform_to_start(const PointType &p)
     float y2 = std::cos(rx) * y1 + std::sin(rx) * z1;
     float z2 = -std::sin(rx) * y1 + std::cos(rx) * z1;
 
-    PointType r;
+    Point r;
     r.x = std::cos(ry) * x2 - std::sin(ry) * z2;
     r.y = y2;
     r.z = std::sin(ry) * x2 + std::cos(ry) * z2;
@@ -596,9 +564,9 @@ PointType transform_to_start(const PointType &p)
     return r;
 }
 
-void transform_to_end(PointType const * const pi, PointType * const po)
+void transform_to_end(Point &p)
 {
-    float s = 10 * (pi->intensity - int(pi->intensity));
+    float s = 10 * (p.intensity - int(p.intensity));
 
     float rx = s * transformCur[0];
     float ry = s * transformCur[1];
@@ -607,9 +575,9 @@ void transform_to_end(PointType const * const pi, PointType * const po)
     float ty = s * transformCur[4];
     float tz = s * transformCur[5];
 
-    float x1 = std::cos(rz) * (pi->x - tx) + std::sin(rz) * (pi->y - ty);
-    float y1 = -std::sin(rz) * (pi->x - tx) + std::cos(rz) * (pi->y - ty);
-    float z1 = (pi->z - tz);
+    float x1 = std::cos(rz) * (p.x - tx) + std::sin(rz) * (p.y - ty);
+    float y1 = -std::sin(rz) * (p.x - tx) + std::cos(rz) * (p.y - ty);
+    float z1 = (p.z - tz);
 
     float x2 = x1;
     float y2 = std::cos(rx) * y1 + std::sin(rx) * z1;
@@ -660,10 +628,10 @@ void transform_to_end(PointType const * const pi, PointType * const po)
     float y11 = std::cos(imuPitchLast) * y10 + std::sin(imuPitchLast) * z10;
     float z11 = -std::sin(imuPitchLast) * y10 + std::cos(imuPitchLast) * z10;
 
-    po->x = std::cos(imuRollLast) * x11 + std::sin(imuRollLast) * y11;
-    po->y = -std::sin(imuRollLast) * x11 + std::cos(imuRollLast) * y11;
-    po->z = z11;
-    po->intensity = int(pi->intensity);
+    p.x = std::cos(imuRollLast) * x11 + std::sin(imuRollLast) * y11;
+    p.y = -std::sin(imuRollLast) * x11 + std::cos(imuRollLast) * y11;
+    p.z = z11;
+    p.intensity = int(pi->intensity);
 }
 
 void plugin_imu_rotation(float bcx, float bcy, float bcz, float blx, float bly, float blz, 
@@ -743,16 +711,6 @@ void accumulate_rotation(float cx, float cy, float cz, float lx, float ly, float
     float crzcrx = std::cos(lx)*std::cos(lz)*std::cos(cx)*std::cos(cz) - std::cos(cx)*std::sin(cz)*(std::cos(ly)*std::sin(lz) 
                     - std::cos(lz)*std::sin(lx)*std::sin(ly)) - std::sin(cx)*(std::sin(ly)*std::sin(lz) + std::cos(ly)*std::cos(lz)*std::sin(lx));
     oz = std::atan2(srzcrx / std::cos(ox), crzcrx / std::cos(ox));
-}
-
-double rad2deg(double radians)
-{
-    return radians * 180.0 / M_PI;
-}
-
-double deg2rad(double degrees)
-{
-    return degrees * M_PI / 180.0;
 }
 
 void find_corresponding_corner_features(int iterCount) {
@@ -838,7 +796,7 @@ void find_corresponding_corner_features(int iterCount) {
 
             if (s > 0.1 && ld2 != 0) {
                 coeff_sel_->emplace_back(s * la, s * lb, s * lc, s * ld2);
-                laserCloudOri->push_back(corner_sharp_cloud_->points[i]);
+                cloud_ori_->push_back(corner_sharp_cloud_->points[i]);
             }
         }
     }
@@ -932,7 +890,7 @@ void find_corresponding_surf_features(int iterCount) {
 
             if (s > 0.1 && pd2 != 0) {
                 coeff_sel_->emplace_back(s * pa, s * pb, s * pc, s * pd2);
-                laserCloudOri->push_back(surf_flat_cloud_->points[i]);
+                cloud_ori_->push_back(surf_flat_cloud_->points[i]);
             }
         }
     }
@@ -940,7 +898,7 @@ void find_corresponding_surf_features(int iterCount) {
 
 bool calculateTransformationSurf(int iterCount) {
 
-    int pointSelNum = laserCloudOri->points.size();
+    int pointSelNum = cloud_ori_->points.size();
 
     cv::Mat matA(pointSelNum, 3, CV_32F, cv::Scalar::all(0));
     cv::Mat matAt(3, pointSelNum, CV_32F, cv::Scalar::all(0));
@@ -970,9 +928,8 @@ bool calculateTransformationSurf(int iterCount) {
     float c7 = b2; float c8 = -b1; float c9 = tx*-b2 - ty*-b1;
 
     for (int i = 0; i < pointSelNum; i++) {
-
-        const auto &p = laserCloudOri->points[i];
-        coeff = coeff_sel_->points[i];
+        const auto &p = cloud_ori_->points[i];
+        const auto &coeff = coeff_sel_->points[i];
 
         float arx = (-a1*p.x + a2*p.y + a3*p.z + a4) * coeff.x
                     + (a5*p.x - a6*p.y + crx*p.z + a7) * coeff.y
@@ -1049,7 +1006,7 @@ bool calculateTransformationSurf(int iterCount) {
 
 bool calculateTransformationCorner(int iterCount) {
 
-    int pointSelNum = laserCloudOri->points.size();
+    int pointSelNum = cloud_ori_->points.size();
 
     cv::Mat matA(pointSelNum, 3, CV_32F, cv::Scalar::all(0));
     cv::Mat matAt(3, pointSelNum, CV_32F, cv::Scalar::all(0));
@@ -1075,8 +1032,8 @@ bool calculateTransformationCorner(int iterCount) {
 
     for (int i = 0; i < pointSelNum; i++) {
 
-        const auto &p = laserCloudOri->points[i];
-        coeff = coeff_sel_->points[i];
+        const auto &p = cloud_ori_->points[i];
+        const auto &coeff = coeff_sel_->points[i];
 
         float ary = (b1*p.x + b2*p.y - b3*p.z + b4) * coeff.x
                     + (b5*p.x + b6*p.y - b7*p.z + b8) * coeff.z;
@@ -1150,7 +1107,7 @@ bool calculateTransformationCorner(int iterCount) {
 
 bool calculateTransformation(int iterCount) {
 
-    int pointSelNum = laserCloudOri->points.size();
+    int pointSelNum = cloud_ori_->points.size();
 
     cv::Mat matA(pointSelNum, 6, CV_32F, cv::Scalar::all(0));
     cv::Mat matAt(6, pointSelNum, CV_32F, cv::Scalar::all(0));
@@ -1181,8 +1138,8 @@ bool calculateTransformation(int iterCount) {
 
     for (int i = 0; i < pointSelNum; i++) {
 
-        const auto &p = laserCloudOri->points[i];
-        coeff = coeff_sel_->points[i];
+        const auto &p = cloud_ori_->points[i];
+        const auto &coeff = coeff_sel_->points[i];
 
         float arx = (-a1*p.x + a2*p.y + a3*p.z + a4) * coeff.x
                     + (a5*p.x - a6*p.y + crx*p.z + a7) * coeff.y
@@ -1273,15 +1230,9 @@ bool calculateTransformation(int iterCount) {
     return true;
 }
 
-void checkSystemInitialization() {
-    std::swap(corner_less_sharp_cloud_, cloud_last_corner_);
-    pcl::PointCloud<PointType>::Ptr laser_cloud_temp = corner_less_sharp_cloud_;
-    corner_less_sharp_cloud_ = cloud_last_corner_;
-    cloud_last_corner_ = laser_cloud_temp;
-
-    laser_cloud_temp = surf_less_flat_cloud_;
-    surf_less_flat_cloud_ = cloud_last_surf_;
-    cloud_last_surf_ = laser_cloud_temp;
+void check_system_initialization() {
+    corner_less_sharp_cloud_.swap(cloud_last_corner_);
+    surf_less_flat_cloud_.swap(cloud_last_surf_);
 
     kdtree_last_corner_->setInputCloud(cloud_last_corner_);
     kdtree_last_surf_->setInputCloud(cloud_last_surf_);
@@ -1298,35 +1249,35 @@ void checkSystemInitialization() {
     laserCloudSurfLast2.header.frame_id = "camera";
     pub_last_surf_cloud_.publish(laserCloudSurfLast2);
 
-    transformSum[0] += pitch_start;
-    transformSum[2] += roll_start;
+    transform_sum_[0] += imu_cache.pitch_start;
+    transform_sum_[2] += imu_cache.roll_start;
 
     systemInitedLM = true;
 }
 
 void update_initial_guess() {
-    imuPitchLast = imu_cache.pitch_current;
-    imuYawLast = imu_cache.yaw_current;
-    imuRollLast = imu_cache.roll_current;
+    imu_cache.imuPitchLast = imu_cache.pitch_current;
+    imu_cache.imuYawLast = imu_cache.yaw_current;
+    imu_cache.imuRollLast = imu_cache.roll_current;
 
-    imuShiftFromStartX = imu_cache.drift_from_start_to_current_x;
-    imuShiftFromStartY = imu_cache.drift_from_start_to_current_y;
-    imuShiftFromStartZ = imu_cache.drift_from_start_to_current_z;
+    imu_cache.imuShiftFromStartX = imu_cache.drift_from_start_to_current_x;
+    imu_cache.imuShiftFromStartY = imu_cache.drift_from_start_to_current_y;
+    imu_cache.imuShiftFromStartZ = imu_cache.drift_from_start_to_current_z;
 
-    imuVeloFromStartX = imu_cache.vel_diff_from_start_to_current_x;
-    imuVeloFromStartY = imu_cache.vel_diff_from_start_to_current_y;
-    imuVeloFromStartZ = imu_cache.vel_diff_from_start_to_current_z;
+    imu_cache.imuVeloFromStartX = imu_cache.vel_diff_from_start_to_current_x;
+    imu_cache.imuVeloFromStartY = imu_cache.vel_diff_from_start_to_current_y;
+    imu_cache.imuVeloFromStartZ = imu_cache.vel_diff_from_start_to_current_z;
 
-    if (imuAngularFromStartX != 0 || imuAngularFromStartY != 0 || imuAngularFromStartZ != 0) {
-        transformCur[0] = - imuAngularFromStartY;
-        transformCur[1] = - imuAngularFromStartZ;
-        transformCur[2] = - imuAngularFromStartX;
+    if (imu_cache.imuAngularFromStartX != 0 || imu_cache.imuAngularFromStartY != 0 || imu_cache.imuAngularFromStartZ != 0) {
+        transformCur[0] = - imu_cache.imuAngularFromStartY;
+        transformCur[1] = - imu_cache.imuAngularFromStartZ;
+        transformCur[2] = - imu_cache.imuAngularFromStartX;
     }
     
-    if (imuVeloFromStartX != 0 || imuVeloFromStartY != 0 || imuVeloFromStartZ != 0) {
-        transformCur[3] -= imuVeloFromStartX * scanPeriod;
-        transformCur[4] -= imuVeloFromStartY * scanPeriod;
-        transformCur[5] -= imuVeloFromStartZ * scanPeriod;
+    if (imu_cache.imuVeloFromStartX != 0 || imu_cache.imuVeloFromStartY != 0 || imu_cache.imuVeloFromStartZ != 0) {
+        transformCur[3] -= imu_cache.imuVeloFromStartX * scanPeriod;
+        transformCur[4] -= imu_cache.imuVeloFromStartY * scanPeriod;
+        transformCur[5] -= imu_cache.imuVeloFromStartZ * scanPeriod;
     }
 }
 
@@ -1335,12 +1286,12 @@ void update_transformation() {
         return;
 
     for (int iterCount1 = 0; iterCount1 < 25; iterCount1++) {
-        laserCloudOri->clear();
+        cloud_ori_->clear();
         coeff_sel_->clear();
 
         find_corresponding_surf_features(iterCount1);
 
-        if (laserCloudOri->points.size() < 10)
+        if (cloud_ori_->points.size() < 10)
             continue;
         if (calculateTransformationSurf(iterCount1) == false)
             break;
@@ -1348,64 +1299,64 @@ void update_transformation() {
 
     for (int iterCount2 = 0; iterCount2 < 25; iterCount2++) {
 
-        laserCloudOri->clear();
+        cloud_ori_->clear();
         coeff_sel_->clear();
 
         find_corresponding_corner_features(iterCount2);
 
-        if (laserCloudOri->points.size() < 10)
+        if (cloud_ori_->points.size() < 10)
             continue;
         if (calculateTransformationCorner(iterCount2) == false)
             break;
     }
 }
 
-void integrateTransformation() {
+void integrate_transformation() {
     float rx, ry, rz, tx, ty, tz;
-    accumulate_rotation(transformSum[0], transformSum[1], transformSum[2], 
+    accumulate_rotation(transform_sum_[0], transform_sum_[1], transform_sum_[2], 
                         -transformCur[0], -transformCur[1], -transformCur[2], rx, ry, rz);
 
-    float x1 = std::cos(rz) * (transformCur[3] - imuShiftFromStartX) 
-                - std::sin(rz) * (transformCur[4] - imuShiftFromStartY);
-    float y1 = std::sin(rz) * (transformCur[3] - imuShiftFromStartX) 
-                + std::cos(rz) * (transformCur[4] - imuShiftFromStartY);
-    float z1 = transformCur[5] - imuShiftFromStartZ;
+    float x1 = std::cos(rz) * (transformCur[3] - imu_cache.imuShiftFromStartX) 
+                - std::sin(rz) * (transformCur[4] - imu_cache.imuShiftFromStartY);
+    float y1 = std::sin(rz) * (transformCur[3] - imu_cache.imuShiftFromStartX) 
+                + std::cos(rz) * (transformCur[4] - imu_cache.imuShiftFromStartY);
+    float z1 = transformCur[5] - imu_cache.imuShiftFromStartZ;
 
     float x2 = x1;
     float y2 = std::cos(rx) * y1 - std::sin(rx) * z1;
     float z2 = std::sin(rx) * y1 + std::cos(rx) * z1;
 
-    tx = transformSum[3] - (std::cos(ry) * x2 + std::sin(ry) * z2);
-    ty = transformSum[4] - y2;
-    tz = transformSum[5] - (-std::sin(ry) * x2 + std::cos(ry) * z2);
+    tx = transform_sum_[3] - (std::cos(ry) * x2 + std::sin(ry) * z2);
+    ty = transform_sum_[4] - y2;
+    tz = transform_sum_[5] - (-std::sin(ry) * x2 + std::cos(ry) * z2);
 
     plugin_imu_rotation(rx, ry, rz, pitch_start, yaw_start, roll_start, 
                         imuPitchLast, imuYawLast, imuRollLast, rx, ry, rz);
 
-    transformSum[0] = rx;
-    transformSum[1] = ry;
-    transformSum[2] = rz;
-    transformSum[3] = tx;
-    transformSum[4] = ty;
-    transformSum[5] = tz;
+    transform_sum_[0] = rx;
+    transform_sum_[1] = ry;
+    transform_sum_[2] = rz;
+    transform_sum_[3] = tx;
+    transform_sum_[4] = ty;
+    transform_sum_[5] = tz;
 }
 
 void publish_odometry() {
-    geometry_msgs::Quaternion geoQuat = tf::createQuaternionMsgFromRollPitchYaw(transformSum[2], -transformSum[0], -transformSum[1]);
+    geometry_msgs::Quaternion geoQuat = tf::createQuaternionMsgFromRollPitchYaw(transform_sum_[2], -transform_sum_[0], -transform_sum_[1]);
 
     laser_odometry_.header.stamp = cloud_header_.stamp;
     laser_odometry_.pose.pose.orientation.x = -geoQuat.y;
     laser_odometry_.pose.pose.orientation.y = -geoQuat.z;
     laser_odometry_.pose.pose.orientation.z = geoQuat.x;
     laser_odometry_.pose.pose.orientation.w = geoQuat.w;
-    laser_odometry_.pose.pose.position.x = transformSum[3];
-    laser_odometry_.pose.pose.position.y = transformSum[4];
-    laser_odometry_.pose.pose.position.z = transformSum[5];
+    laser_odometry_.pose.pose.position.x = transform_sum_[3];
+    laser_odometry_.pose.pose.position.y = transform_sum_[4];
+    laser_odometry_.pose.pose.position.z = transform_sum_[5];
     pub_laser_odometry_.publish(laser_odometry_);
 
     laser_odometry_trans_.stamp_ = cloud_header_.stamp;
     laser_odometry_trans_.setRotation(tf::Quaternion(-geoQuat.y, -geoQuat.z, geoQuat.x, geoQuat.w));
-    laser_odometry_trans_.setOrigin(tf::Vector3(transformSum[3], transformSum[4], transformSum[5]));
+    laser_odometry_trans_.setOrigin(tf::Vector3(transform_sum_[3], transform_sum_[4], transform_sum_[5]));
     tf_broadcaster_.sendTransform(laser_odometry_trans_);
 }
 
@@ -1419,28 +1370,18 @@ void adjust_outlier_cloud() {
     }
 }
 
-void publishCloudsLast() {
-
+void publish_cloud_last() {
     updateImuRollPitchYawStartSinCos();
 
-    int cornerPointsLessSharpNum = corner_less_sharp_cloud_->points.size();
-    for (int i = 0; i < cornerPointsLessSharpNum; i++) {
-        transform_to_end(&corner_less_sharp_cloud_->points[i], &corner_less_sharp_cloud_->points[i]);
+    for (auto &p : corner_less_sharp_cloud_->points) {
+        transform_to_end(p);
+    }
+    for (auto &p : surf_less_flat_cloud_->points) {
+        transform_to_end(p);
     }
 
-
-    int surfPointsLessFlatNum = surf_less_flat_cloud_->points.size();
-    for (int i = 0; i < surfPointsLessFlatNum; i++) {
-        transform_to_end(&surf_less_flat_cloud_->points[i], &surf_less_flat_cloud_->points[i]);
-    }
-
-    pcl::PointCloud<PointType>::Ptr laser_cloud_temp = corner_less_sharp_cloud_;
-    corner_less_sharp_cloud_ = cloud_last_corner_;
-    cloud_last_corner_ = laser_cloud_temp;
-
-    laser_cloud_temp = surf_less_flat_cloud_;
-    surf_less_flat_cloud_ = cloud_last_surf_;
-    cloud_last_surf_ = laser_cloud_temp;
+    corner_less_sharp_cloud_.swap(cloud_last_corner_);
+    surf_less_flat_cloud_.swap(cloud_last_surf_);
 
     if (cloud_last_corner_->points.size()> 10 && cloud_last_surf_->points.size() > 100) {
         kdtree_last_corner_->setInputCloud(cloud_last_corner_);
@@ -1500,7 +1441,7 @@ void run()
     2. Feature Association
     */
     if (!systemInitedLM) {
-        checkSystemInitialization();
+        check_system_initialization();
         return;
     }
 
@@ -1508,11 +1449,11 @@ void run()
 
     update_transformation();
 
-    integrateTransformation();
+    integrate_transformation();
 
     publish_odometry();
 
-    publishCloudsLast(); // cloud to mapOptimization
+    publish_cloud_last(); // cloud to mapOptimization
 }
 
 int main(int argc, char** argv)
@@ -1521,15 +1462,13 @@ int main(int argc, char** argv)
 
     ROS_INFO("\033[1;32m---->\033[0m Feature Association Started.");
 
-    FeatureAssociation FA;
+    FeatureAssociation fa;
 
     ros::Rate rate(200);
     while (ros::ok())
     {
         ros::spinOnce();
-
-        FA.run();
-
+        fa.run();
         rate.sleep();
     }
     

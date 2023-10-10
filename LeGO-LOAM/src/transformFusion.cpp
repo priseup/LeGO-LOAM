@@ -31,55 +31,51 @@
 //     Robotics: Science and Systems Conference (RSS). Berkeley, CA, July 2014.
 
 #include "utility.h"
+#include "lego_math.h"
 
 class TransformFusion{
 private:
     ros::NodeHandle nh_;
 
-    ros::Publisher pubLaserOdometry2;
+    ros::Publisher pub_laser_odom_;
     ros::Subscriber sub_laser_odom_;
-    ros::Subscriber subOdomAftMapped;
-  
+    ros::Subscriber sub_odom_mapped_;
 
-    nav_msgs::Odometry laserOdometry2;
-    tf::StampedTransform laserOdometryTrans2;
-    tf::TransformBroadcaster tfBroadcaster2;
+    std_msgs::Header current_header_;
+    nav_msgs::Odometry laser_odom_;
 
-    tf::StampedTransform map_2_camera_init_Trans;
-    tf::TransformBroadcaster tfBroadcasterMap2CameraInit;
+    tf::StampedTransform transform_laser_odom_;
+    tf::StampedTransform transform_map_2_camera_;
+    tf::StampedTransform transform_camera_2_baselink_;
+    tf::TransformBroadcaster tf_broadcaster_;
 
-    tf::StampedTransform camera_2_base_link_Trans;
-    tf::TransformBroadcaster tfBroadcasterCamera2Baselink;
-
-    float transformSum[6];
+    float transform_sum_[6];
     float transformIncre[6];
     float transformMapped[6];
     float transformBefMapped[6];
     float transformAftMapped[6];
 
-    std_msgs::Header currentHeader;
-
 public:
     TransformFusion() {
-        pubLaserOdometry2 = nh_.advertise<nav_msgs::Odometry> ("/integrated_to_init", 5);
-        sub_laser_odom_ = nh_.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 5, &TransformFusion::laserOdometryHandler, this);
-        subOdomAftMapped = nh_.subscribe<nav_msgs::Odometry>("/aft_mapped_to_init", 5, &TransformFusion::odomAftMappedHandler, this);
+        pub_laser_odom_ = nh_.advertise<nav_msgs::Odometry>("/integrated_to_init", 5);
+        sub_laser_odom_ = nh_.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 5, &TransformFusion::laser_odom_handler, this);
+        sub_odom_mapped_ = nh_.subscribe<nav_msgs::Odometry>("/aft_mapped_to_init", 5, &TransformFusion::odom_mapped_handler, this);
 
-        laserOdometry2.header.frame_id = "camera_init";
-        laserOdometry2.child_frame_id = "camera";
+        laser_odom_.header.frame_id = "camera_init";
+        laser_odom_.child_frame_id = "camera";
 
-        laserOdometryTrans2.frame_id_ = "camera_init";
-        laserOdometryTrans2.child_frame_id_ = "camera";
+        transform_laser_odom_.frame_id_ = "camera_init";
+        transform_laser_odom_.child_frame_id_ = "camera";
 
-        map_2_camera_init_Trans.frame_id_ = "map";
-        map_2_camera_init_Trans.child_frame_id_ = "camera_init";
+        transform_map_2_camera_.frame_id_ = "map";
+        transform_map_2_camera_.child_frame_id_ = "camera_init";
 
-        camera_2_base_link_Trans.frame_id_ = "camera";
-        camera_2_base_link_Trans.child_frame_id_ = "base_link";
+        transform_camera_2_baselink_.frame_id_ = "camera";
+        transform_camera_2_baselink_.child_frame_id_ = "base_link";
 
         for (int i = 0; i < 6; ++i)
         {
-            transformSum[i] = 0;
+            transform_sum_[i] = 0;
             transformIncre[i] = 0;
             transformMapped[i] = 0;
             transformBefMapped[i] = 0;
@@ -89,26 +85,23 @@ public:
 
     void transformAssociateToMap()
     {
-        float x1 = std::cos(transformSum[1]) * (transformBefMapped[3] - transformSum[3]) 
-                 - std::sin(transformSum[1]) * (transformBefMapped[5] - transformSum[5]);
-        float y1 = transformBefMapped[4] - transformSum[4];
-        float z1 = std::sin(transformSum[1]) * (transformBefMapped[3] - transformSum[3]) 
-                 + std::cos(transformSum[1]) * (transformBefMapped[5] - transformSum[5]);
+        float sbcx = std::sin(transform_sum_[0]);
+        float cbcx = std::cos(transform_sum_[0]);
+        float sbcy = std::sin(transform_sum_[1]);
+        float cbcy = std::cos(transform_sum_[1]);
+        float sbcz = std::sin(transform_sum_[2]);
+        float cbcz = std::cos(transform_sum_[2]);
 
-        float x2 = x1;
-        float y2 = std::cos(transformSum[0]) * y1 + std::sin(transformSum[0]) * z1;
-        float z2 = -std::sin(transformSum[0]) * y1 + std::cos(transformSum[0]) * z1;
+        auto r0 = rotate_by_yxz(transformBefMapped[3] - transform_sum_[3],
+                                transformBefMapped[4] - transform_sum_[4],
+                                transformBefMapped[5] - transform_sum_[5],
+                                cbcx, -sbcx,
+                                cbcy, -sbcy,
+                                cbcz, -sbcz);
 
-        transformIncre[3] = std::cos(transformSum[2]) * x2 + std::sin(transformSum[2]) * y2;
-        transformIncre[4] = -std::sin(transformSum[2]) * x2 + std::cos(transformSum[2]) * y2;
-        transformIncre[5] = z2;
-
-        float sbcx = std::sin(transformSum[0]);
-        float cbcx = std::cos(transformSum[0]);
-        float sbcy = std::sin(transformSum[1]);
-        float cbcy = std::cos(transformSum[1]);
-        float sbcz = std::sin(transformSum[2]);
-        float cbcz = std::cos(transformSum[2]);
+        transformIncre[3] = r0[0];
+        transformIncre[4] = r0[1];
+        transformIncre[5] = r0[2];
 
         float sblx = std::sin(transformBefMapped[0]);
         float cblx = std::cos(transformBefMapped[0]);
@@ -159,88 +152,88 @@ public:
         transformMapped[2] = std::atan2(srzcrx / std::cos(transformMapped[0]), 
                                    crzcrx / std::cos(transformMapped[0]));
 
-        x1 = std::cos(transformMapped[2]) * transformIncre[3] - std::sin(transformMapped[2]) * transformIncre[4];
-        y1 = std::sin(transformMapped[2]) * transformIncre[3] + std::cos(transformMapped[2]) * transformIncre[4];
-        z1 = transformIncre[5];
+        auto r1 = rotate_by_zxy(transformIncre[3],
+                                transformIncre[4],
+                                transformIncre[5],
+                                std::cos(transformMapped[0]),
+                                std::sin(transformMapped[0]),
+                                std::cos(transformMapped[1]),
+                                std::sin(transformMapped[1]),
+                                std::cos(transformMapped[2]),
+                                std::sin(transformMapped[2]));
 
-        x2 = x1;
-        y2 = std::cos(transformMapped[0]) * y1 - std::sin(transformMapped[0]) * z1;
-        z2 = std::sin(transformMapped[0]) * y1 + std::cos(transformMapped[0]) * z1;
-
-        transformMapped[3] = transformAftMapped[3] 
-                           - (std::cos(transformMapped[1]) * x2 + std::sin(transformMapped[1]) * z2);
-        transformMapped[4] = transformAftMapped[4] - y2;
-        transformMapped[5] = transformAftMapped[5] 
-                           - (-std::sin(transformMapped[1]) * x2 + std::cos(transformMapped[1]) * z2);
+        transformMapped[3] = transformAftMapped[3] - r1[0];
+        transformMapped[4] = transformAftMapped[4] - r1[1];
+        transformMapped[5] = transformAftMapped[5] - r1[2];
     }
 
-    void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr& laser_odometry_)
+    void laser_odom_handler(const nav_msgs::Odometry::ConstPtr &laser_odometry_)
     {
-        currentHeader = laser_odometry_->header;
+        current_header_ = laser_odometry_->header;
 
         double roll, pitch, yaw;
         geometry_msgs::Quaternion geoQuat = laser_odometry_->pose.pose.orientation;
         tf::Matrix3x3(tf::Quaternion(geoQuat.z, -geoQuat.x, -geoQuat.y, geoQuat.w)).getRPY(roll, pitch, yaw);
 
-        transformSum[0] = -pitch;
-        transformSum[1] = -yaw;
-        transformSum[2] = roll;
+        transform_sum_[0] = -pitch;
+        transform_sum_[1] = -yaw;
+        transform_sum_[2] = roll;
 
-        transformSum[3] = laser_odometry_->pose.pose.position.x;
-        transformSum[4] = laser_odometry_->pose.pose.position.y;
-        transformSum[5] = laser_odometry_->pose.pose.position.z;
+        transform_sum_[3] = laser_odometry_->pose.pose.position.x;
+        transform_sum_[4] = laser_odometry_->pose.pose.position.y;
+        transform_sum_[5] = laser_odometry_->pose.pose.position.z;
 
         transformAssociateToMap();
 
         geoQuat = tf::createQuaternionMsgFromRollPitchYaw
                   (transformMapped[2], -transformMapped[0], -transformMapped[1]);
 
-        laserOdometry2.header.stamp = laser_odometry_->header.stamp;
-        laserOdometry2.pose.pose.orientation.x = -geoQuat.y;
-        laserOdometry2.pose.pose.orientation.y = -geoQuat.z;
-        laserOdometry2.pose.pose.orientation.z = geoQuat.x;
-        laserOdometry2.pose.pose.orientation.w = geoQuat.w;
-        laserOdometry2.pose.pose.position.x = transformMapped[3];
-        laserOdometry2.pose.pose.position.y = transformMapped[4];
-        laserOdometry2.pose.pose.position.z = transformMapped[5];
-        pubLaserOdometry2.publish(laserOdometry2);
+        laser_odom_.header.stamp = laser_odometry_->header.stamp;
+        laser_odom_.pose.pose.orientation.x = -geoQuat.y;
+        laser_odom_.pose.pose.orientation.y = -geoQuat.z;
+        laser_odom_.pose.pose.orientation.z = geoQuat.x;
+        laser_odom_.pose.pose.orientation.w = geoQuat.w;
+        laser_odom_.pose.pose.position.x = transformMapped[3];
+        laser_odom_.pose.pose.position.y = transformMapped[4];
+        laser_odom_.pose.pose.position.z = transformMapped[5];
+        pub_laser_odom_.publish(laser_odom_);
 
-        laserOdometryTrans2.stamp_ = laser_odometry_->header.stamp;
-        laserOdometryTrans2.setRotation(tf::Quaternion(-geoQuat.y, -geoQuat.z, geoQuat.x, geoQuat.w));
-        laserOdometryTrans2.setOrigin(tf::Vector3(transformMapped[3], transformMapped[4], transformMapped[5]));
-        tfBroadcaster2.sendTransform(laserOdometryTrans2);
+        transform_laser_odom_.stamp_ = laser_odometry_->header.stamp;
+        transform_laser_odom_.setRotation(tf::Quaternion(-geoQuat.y, -geoQuat.z, geoQuat.x, geoQuat.w));
+        transform_laser_odom_.setOrigin(tf::Vector3(transformMapped[3], transformMapped[4], transformMapped[5]));
+        tf_broadcaster_.sendTransform(transform_laser_odom_);
     }
 
-    void odomAftMappedHandler(const nav_msgs::Odometry::ConstPtr& odom_mapped_)
+    void odom_mapped_handler(const nav_msgs::Odometry::ConstPtr &odom_mapped)
     {
         double roll, pitch, yaw;
-        geometry_msgs::Quaternion geoQuat = odom_mapped_->pose.pose.orientation;
+        geometry_msgs::Quaternion geoQuat = odom_mapped->pose.pose.orientation;
         tf::Matrix3x3(tf::Quaternion(geoQuat.z, -geoQuat.x, -geoQuat.y, geoQuat.w)).getRPY(roll, pitch, yaw);
 
         transformAftMapped[0] = -pitch;
         transformAftMapped[1] = -yaw;
         transformAftMapped[2] = roll;
 
-        transformAftMapped[3] = odom_mapped_->pose.pose.position.x;
-        transformAftMapped[4] = odom_mapped_->pose.pose.position.y;
-        transformAftMapped[5] = odom_mapped_->pose.pose.position.z;
+        transformAftMapped[3] = odom_mapped->pose.pose.position.x;
+        transformAftMapped[4] = odom_mapped->pose.pose.position.y;
+        transformAftMapped[5] = odom_mapped->pose.pose.position.z;
 
-        transformBefMapped[0] = odom_mapped_->twist.twist.angular.x;
-        transformBefMapped[1] = odom_mapped_->twist.twist.angular.y;
-        transformBefMapped[2] = odom_mapped_->twist.twist.angular.z;
+        transformBefMapped[0] = odom_mapped->twist.twist.angular.x;
+        transformBefMapped[1] = odom_mapped->twist.twist.angular.y;
+        transformBefMapped[2] = odom_mapped->twist.twist.angular.z;
 
-        transformBefMapped[3] = odom_mapped_->twist.twist.linear.x;
-        transformBefMapped[4] = odom_mapped_->twist.twist.linear.y;
-        transformBefMapped[5] = odom_mapped_->twist.twist.linear.z;
+        transformBefMapped[3] = odom_mapped->twist.twist.linear.x;
+        transformBefMapped[4] = odom_mapped->twist.twist.linear.y;
+        transformBefMapped[5] = odom_mapped->twist.twist.linear.z;
     }
 };
 
 
-int main(int argc, char** argv)
+int main(int argc, const char **argv)
 {
     ros::init(argc, argv, "lego_loam");
     
-    TransformFusion TFusion;
+    TransformFusion tf;
 
     ROS_INFO("\033[1;32m---->\033[0m Transform Fusion Started.");
 

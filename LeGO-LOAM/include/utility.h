@@ -44,11 +44,9 @@
 #include <thread>
 #include <mutex>
 
-#define PI 3.14159265
-
 using namespace std;
 
-typedef pcl::PointXYZI  PointType;
+typedef pcl::PointXYZI  Point;
 
 extern const string pointCloudTopic = "/velodyne_points";
 extern const string imuTopic = "/imu_raw";
@@ -184,6 +182,6 @@ POINT_CLOUD_REGISTER_POINT_STRUCT (PointXYZIRPYT,
                                    (double, time, time)
 )
 
-typedef PointXYZIRPYT  PointTypePose;
+typedef PointXYZIRPYT  PointPose;
 
 #endif

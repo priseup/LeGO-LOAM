@@ -1,15 +1,15 @@
 #include <cmath>
 #include "lego_math.h"
 
-double square_distance(const PointType &p0, const PointType &p1) {
+double square_distance(const Point &p0, const Point &p1) {
     return (p0.x - p1.x) * (p0.x - p1.y) + (p0.y - p1.y) * (p0.y - p1.y) + (p0.z - p1.z) * (p0.z - p1.z);
 }
 
-double distance(const PointType &p0, const PointType &p1) {
+double distance(const Point &p0, const Point &p1) {
     return std::sqrt((p0.x - p1.x) * (p0.x - p1.y) + (p0.y - p1.y) * (p0.y - p1.y) + (p0.z - p1.z) * (p0.z - p1.z));
 }
 
-double laser_range(const PointType &p) {
+double laser_range(const Point &p) {
     return std::sqrt(p.x * p.x + p.y * p.y + p.z + p.z);
 }
 
