@@ -40,9 +40,6 @@ FeatureAssociation::FeatureAssociation(): nh_("~") {
     surf_flat_cloud_.reset(new pcl::PointCloud<Point>);
     surf_less_flat_cloud_.reset(new pcl::PointCloud<Point>);
 
-    surf_less_flat_scan_.reset(new pcl::PointCloud<Point>);
-    surf_less_flat_scan_ds_.reset(new pcl::PointCloud<Point>);
-
     init();
 }
 
@@ -52,7 +49,7 @@ void FeatureAssociation::init()
 
     cloud_curvature_ = new float[points_num];
     is_neibor_picked_ = new int[points_num];
-    cloud_label_.assign(points_num, FeatureAssociation::FeatureLabel::unknown);
+    cloud_label_.assign(points_num, FeatureAssociation::FeatureLabel::surf_less_flat);
 
     pointSearchCornerInd1 = new float[points_num];
     pointSearchCornerInd2 = new float[points_num];
@@ -394,8 +391,25 @@ void FeatureAssociation::mark_occluded_points()
     }
 }
 
+void FeatureAssociation::mark_neibor_is_picked(int idx)
+{
+    const auto &cloud_column = segmented_cloud_msg_.ground_segment_cloud_column;
+    for (int i = 1; i <= 5; i++) {
+        if (std::abs(cloud_column[idx + i] - cloud_column[idx + i - 1]) > 10)
+            break;
+        is_neibor_picked_[idx + i] = 1;
+    }
+    for (int i = -1; i >= -5; i--) {
+        if (std::abs(cloud_column[idx + i] - cloud_column[idx + i + 1]) > 10)
+            break;
+        is_neibor_picked_[idx + i] = 1;
+    }
+}
+
 void FeatureAssociation::extract_features()
 {
+    static pcl::PointCloud<Point>::Ptr surf_less_flat_points(new pcl::PointCloud<Point>);
+
     corner_sharp_cloud_->clear();
     corner_less_sharp_cloud_->clear();
     surf_flat_cloud_->clear();
@@ -406,45 +420,21 @@ void FeatureAssociation::extract_features()
     const auto &cloud_column = segmented_cloud_msg_.ground_segment_cloud_column;
 
     for (int i = 0; i < N_SCAN; i++) {
-        surf_less_flat_scan_->clear();
+        surf_less_flat_points->clear();
 
         for (int j = 0; j < 6; j++) {
             int sp = (segmented_cloud_msg_.ring_index_start[i] * (6 - j)  + segmented_cloud_msg_.ring_index_end[i] * j) / 6;
             int ep = (segmented_cloud_msg_.ring_index_start[i] * (5 - j)  + segmented_cloud_msg_.ring_index_end[i] * (j + 1)) / 6 - 1;
             if (sp >= ep)
                 continue;
+            std::sort(cloud_smoothness_.begin() + sp, cloud_smoothness_.begin() + ep + 1);
 
-            std::sort(cloud_smoothness_.begin() + sp, cloud_smoothness_.begin() + ep);
-
-
-            // for (int k = sp; k <= ep; k++) {
-            //     int idx = cloud_smoothness_[k].idx;
-            //     if (is_neibor_picked_[idx] != 0)
-            //         continue;
-
-            //     if (segmented_cloud_msg_.ground_segment_flag[idx] == false && cloud_curvature_[idx] > edgeThreshold) {
-            //         if (corner_sharp_cloud_->size() <= 2) {
-            //             cloud_label_[idx] = FeatureAssociation::FeatureLabel::corner_sharp;
-            //             corner_sharp_cloud_->push_back(cloud[idx]);
-            //             corner_less_sharp_cloud_->push_back(cloud[idx]);
-            //         } else if (corner_less_sharp_cloud_->size() <= 20) {
-            //             cloud_label_[idx] = FeatureAssociation::FeatureLabel::corner_less_sharp;
-            //             corner_less_sharp_cloud_->push_back(cloud[idx]);
-
-            //     } else if {
-
-            //     }
-
-
-            // }
-
-            for (int k = ep; k >= sp; k--) {
+            for (int k = ep; ep >= sp; k--) {
                 int idx = cloud_smoothness_[k].idx;
 
                 if (is_neibor_picked_[idx] == 0
-                    && cloud_curvature_[idx] > edgeThreshold
-                    && segmented_cloud_msg_.ground_segment_flag[idx] == false) {
-                
+                    && !segmented_cloud_msg_.ground_segment_flag[idx]
+                    && cloud_curvature_[idx] > edgeThreshold ) {
                     if (corner_sharp_cloud_->size() <= 2) {
                         cloud_label_[idx] = FeatureAssociation::FeatureLabel::corner_sharp;
                         corner_sharp_cloud_->push_back(cloud[idx]);
@@ -457,26 +447,16 @@ void FeatureAssociation::extract_features()
                     }
 
                     is_neibor_picked_[idx] = 1;
-                    for (int l = 1; l <= 5; l++) {
-                        if (std::abs(cloud_column[idx + l] - cloud_column[idx + l - 1]) > 10)
-                            break;
-                        is_neibor_picked_[idx + l] = 1;
-                    }
-                    for (int l = -1; l >= -5; l--) {
-                        if (std::abs(cloud_column[idx + l] - cloud_column[idx + l + 1]) > 10)
-                            break;
-                        is_neibor_picked_[idx + l] = 1;
-                    }
+                    mark_neibor_is_picked(idx);
                 }
             }
 
             for (int k = sp; k <= ep; k++) {
                 int idx = cloud_smoothness_[k].idx;
 
-                if (is_neibor_picked_[idx] == 0 &&
-                    cloud_curvature_[idx] < surfThreshold &&
-                    segmented_cloud_msg_.ground_segment_flag[idx] == true) {
-
+                if (is_neibor_picked_[idx] == 0
+                    && segmented_cloud_msg_.ground_segment_flag[idx]
+                    && cloud_curvature_[idx] < surfThreshold) {
                     cloud_label_[idx] = FeatureAssociation::FeatureLabel::surf_flat;
                     surf_flat_cloud_->push_back(projected_ground_segment_cloud_->points[idx]);
                     if (surf_flat_cloud_->size() >= 4) {
@@ -484,30 +464,20 @@ void FeatureAssociation::extract_features()
                     }
 
                     is_neibor_picked_[idx] = 1;
-                    for (int l = 1; l <= 5; l++) {
-                        if (std::abs(int(cloud_column[idx + l] - cloud_column[idx + l - 1])) > 10)
-                            break;
-                        is_neibor_picked_[idx + l] = 1;
-                    }
-                    for (int l = -1; l >= -5; l--) {
-                        if (std::abs(int(cloud_column[idx + l] - cloud_column[idx + l + 1])) > 10)
-                            break;
-                        is_neibor_picked_[idx + l] = 1;
-                    }
+                    mark_neibor_is_picked(idx);
                 }
             }
 
             for (int k = sp; k <= ep; k++) {
-                if (cloud_label_[k] == FeatureAssociation::FeatureLabel::unknown
-                    ||cloud_label_[k] == FeatureAssociation::FeatureLabel::surf_flat) {
-                    surf_less_flat_scan_->push_back(projected_ground_segment_cloud_->points[k]);
+                if (cloud_label_[k] == FeatureAssociation::FeatureLabel::surf_less_flat) {
+                    surf_less_flat_points->push_back(projected_ground_segment_cloud_->points[k]);
                 }
             }
         }
 
-        voxel_grid_filter_.setInputCloud(surf_less_flat_scan_);
-        voxel_grid_filter_.filter(*surf_less_flat_scan_ds_);
-        *surf_less_flat_cloud_ += *surf_less_flat_scan_ds_;
+        voxel_grid_filter_.setInputCloud(surf_less_flat_points);
+        voxel_grid_filter_.filter(*surf_less_flat_points);
+        *surf_less_flat_cloud_ += *surf_less_flat_points;
     }
 }
 
@@ -677,50 +647,99 @@ void FeatureAssociation::accumulate_rotation(const float &cx, const float &cy, c
     oz = std::atan2(srzcrx / std::cos(ox), crzcrx / std::cos(ox));
 }
 
-void FeatureAssociation::find_corresponding_corner_features(int iterCount) {
+int FeatureAssociation::point_scan_id(const Point &p) {
+    return int(p.intensity);
+}
+
+void FeatureAssociation::find_closest_in_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud) {
+    int min_idx = -1;
+    float min_distance = nearestFeatureSearchSqDist;
+    int closest_scan_id = point_scan_id(cloud->points[closest_idx]);
+
+    for (int i = closest_idx + 1; i < cloud->points.size(); i++) {
+        if (point_scan_id(cloud->points[i]) > closest_scan_id + 2.5) { // why > +2.5
+            break;   // why not continue
+        }
+        float d = square_distance(cloud->points[i], p);
+        if (point_scan_id(cloud->points[i]) > closest_scan_id) {    // why >
+            if (d < min_distance) {
+                min_distance = d;
+                min_idx = i;
+            }
+        }
+    }
+    for (int i = closest_idx - 1; i >= 0; i--) {
+        if (point_scan_id(cloud->points[i]) < closest_scan_id - 2.5) { // why < -2.5
+            break;  // why not continue
+        }
+
+        float d = square_distance(cloud->points[i], p);
+        if (point_scan_id(cloud->points[i]) < closest_scan_id) { // why <
+            if (d < min_distance) {
+                min_distance = d;
+                min_idx = i;
+            }
+        }
+    }
+
+    return min_idx;
+}
+std::array<float, 2> FeatureAssociation::find_closest_in_same_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud) {
+    int min_idx_same = -1;
+    int min_idx_adj = -1;
+    float min_dis_same = nearestFeatureSearchSqDist;
+    float min_dis_adj = nearestFeatureSearchSqDist;
+    int closest_scan_id = point_scan_id(cloud->points[closest_idx]);
+
+    for (int i = closest_idx + 1; i < cloud->points.size(); i++) {
+        if (point_scan_id(cloud->points[i]) > closest_scan_id + 2.5) {
+            break;
+        }
+
+        float d = square_distance(cloud->points[i], p);
+        if (point_scan_id(cloud->points[i]) <= closest_scan_id) {
+            if (d < min_dis_same) {
+                min_dis_same = d;
+                min_idx_same = i;
+            }
+        } else {
+            if (d < min_dis_adj) {
+                min_dis_adj = d;
+                min_idx_adj = i;
+            }
+        }
+    }
+    for (int i = closest_idx - 1; i >= 0; i--) {
+        if (point_scan_id(cloud->points[i]) < closest_scan_id - 2.5) {
+            break;
+        }
+
+        float d = square_distance(cloud->points[i], p);
+        if (point_scan_id(cloud->points[i]) >= closest_scan_id) {
+            if (d < min_dis_same) {
+                min_dis_same = d;
+                min_idx_same = i;
+            }
+        } else {
+            if (d < min_dis_adj) {
+                min_dis_adj = d;
+                min_idx_adj = i;
+            }
+        }
+    }
+
+    return {min_idx_same, min_idx_adj};
+}
+
+void FeatureAssociation::find_corresponding_corner_features() {
     for (int i = 0; i < corner_sharp_cloud_->points.size(); i++) {
         auto p = transform_to_start(corner_sharp_cloud_->points[i]);
-        if (iterCount % 5 != 0) {
-            continue;
-        }
         std::vector<int> closest_indices;
         std::vector<float> closest_square_distances;
         kdtree_last_corner_->nearestKSearch(p, 1, closest_indices, closest_square_distances);
-        int minPointInd2 = -1;
-        
         if (closest_square_distances[0] < nearestFeatureSearchSqDist) {
-            int idx = closest_indices[0];
-            int closest_scan_id = int(cloud_last_corner_->points[idx].intensity);
-
-            float minPointSqDis2 = nearestFeatureSearchSqDist;
-            for (int j = idx + 1; j < corner_sharp_cloud_->points.size(); j++) {
-                if (int(cloud_last_corner_->points[j].intensity) > closest_scan_id + 2.5) {
-                    break;
-                }
-                float d = square_distance(cloud_last_corner_->points[j], p);
-                if (int(cloud_last_corner_->points[j].intensity) > closest_scan_id) {
-                    if (d < minPointSqDis2) {
-                        minPointSqDis2 = d;
-                        minPointInd2 = j;
-                    }
-                }
-            }
-            for (int j = idx - 1; j >= 0; j--) {
-                if (int(cloud_last_corner_->points[j].intensity) < closest_scan_id - 2.5) {
-                    break;
-                }
-
-                float d = square_distance(cloud_last_corner_->points[j], p);
-                if (int(cloud_last_corner_->points[j].intensity) < closest_scan_id) {
-                    if (d < minPointSqDis2) {
-                        minPointSqDis2 = d;
-                        minPointInd2 = j;
-                    }
-                }
-            }
-
-            pointSearchCornerInd1[i] = idx;
-            pointSearchCornerInd2[i] = minPointInd2;
+            pointSearchCornerInd1[i] = closest_indices[0];
+            pointSearchCornerInd2[i] = find_closest_in_adjacent_ring(closest_indices[0], p, cloud_last_corner_);
         }
 
         if (pointSearchCornerInd2[i] >= 0) {
@@ -742,15 +761,10 @@ void FeatureAssociation::find_corresponding_corner_features(int iterCount) {
             float m33 = ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1));
 
             float a012 = std::sqrt(m11 * m11  + m22 * m22 + m33 * m33);
-
             float l12 = std::sqrt((x1 - x2)*(x1 - x2) + (y1 - y2)*(y1 - y2) + (z1 - z2)*(z1 - z2));
-
             float la =  ((y1 - y2)*m11 + (z1 - z2)*m22) / a012 / l12;
-
             float lb = -((x1 - x2)*m11 - (z1 - z2)*m33) / a012 / l12;
-
             float lc = -((x1 - x2)*m22 + (y1 - y2)*m33) / a012 / l12;
-
             float ld2 = a012 / l12;
 
             float s = 1;
@@ -759,70 +773,32 @@ void FeatureAssociation::find_corresponding_corner_features(int iterCount) {
             }
 
             if (s > 0.1 && ld2 != 0) {
-                coeff_sel_->emplace_back(s * la, s * lb, s * lc, s * ld2);
+                Point coeff;
+                coeff.x = s * la;
+                coeff.y = s * lb;
+                coeff.z = s * sc;
+                coeff.intensity = s * ld2;
+                coeff_sel_->push_back(coeff);
                 cloud_ori_->push_back(corner_sharp_cloud_->points[i]);
             }
         }
     }
 }
 
-void FeatureAssociation::find_corresponding_surf_features(int iterCount) {
+void FeatureAssociation::find_corresponding_surf_features() {
     for (int i = 0; i < surf_flat_cloud_->points.size(); i++) {
         auto p = transform_to_start(surf_flat_cloud_->points[i]);
-        if (iterCount % 5 != 0) {
-            continue;
-        }
         std::vector<int> closest_indices;
         std::vector<float> closest_square_distances;
         kdtree_last_surf_->nearestKSearch(p, 1, closest_indices, closest_square_distances);
-        int minPointInd2 = -1, minPointInd3 = -1;
 
         if (closest_square_distances[0] < nearestFeatureSearchSqDist) {
-            int idx = closest_indices[0];
-            int closest_scan_id = int(cloud_last_surf_->points[idx].intensity);
+            auto ps = find_closest_in_same_adjacent_ring(closest_indices[0], p, cloud_last_surf_); 
 
-            float minPointSqDis2 = nearestFeatureSearchSqDist, minPointSqDis3 = nearestFeatureSearchSqDist;
-            for (int j = idx + 1; j < surf_flat_cloud_->points.size(); j++) {
-                if (int(cloud_last_surf_->points[j].intensity) > closest_scan_id + 2.5) {
-                    break;
-                }
-
-                float d = square_distance(cloud_last_surf_->points[j], p);
-                if (int(cloud_last_surf_->points[j].intensity) <= closest_scan_id) {
-                    if (d < minPointSqDis2) {
-                        minPointSqDis2 = d;
-                        minPointInd2 = j;
-                    }
-                } else {
-                    if (d < minPointSqDis3) {
-                        minPointSqDis3 = d;
-                        minPointInd3 = j;
-                    }
-                }
-            }
-            for (int j = idx - 1; j >= 0; j--) {
-                if (int(cloud_last_surf_->points[j].intensity) < closest_scan_id - 2.5) {
-                    break;
-                }
-
-                float d = square_distance(cloud_last_surf_->points[j], p);
-                if (int(cloud_last_surf_->points[j].intensity) >= closest_scan_id) {
-                    if (d < minPointSqDis2) {
-                        minPointSqDis2 = d;
-                        minPointInd2 = j;
-                    }
-                } else {
-                    if (d < minPointSqDis3) {
-                        minPointSqDis3 = d;
-                        minPointInd3 = j;
-                    }
-                }
-            }
+            pointSearchSurfInd1[i] = closest_indices[0];
+            pointSearchSurfInd2[i] = ps[0];
+            pointSearchSurfInd3[i] = ps[1];
         }
-
-        pointSearchSurfInd1[i] = idx;
-        pointSearchSurfInd2[i] = minPointInd2;
-        pointSearchSurfInd3[i] = minPointInd3;
 
         if (pointSearchSurfInd2[i] >= 0 && pointSearchSurfInd3[i] >= 0) {
             auto tripod1 = cloud_last_surf_->points[pointSearchSurfInd1[i]];
@@ -852,7 +828,12 @@ void FeatureAssociation::find_corresponding_surf_features(int iterCount) {
             }
 
             if (s > 0.1 && pd2 != 0) {
-                coeff_sel_->emplace_back(s * pa, s * pb, s * pc, s * pd2);
+                Point coeff;
+                coeff.x = s * pa;
+                coeff.y = s * pb;
+                coeff.z = s * pc;
+                coeff.intensity = s * pd2;
+                coeff_sel_->push_back(coeff);
                 cloud_ori_->push_back(surf_flat_cloud_->points[i]);
             }
         }
@@ -1232,27 +1213,25 @@ void FeatureAssociation::update_transformation() {
     if (cloud_last_corner_->points.size() < 10 || cloud_last_surf_->points.size() < 100)
         return;
 
-    for (int iterCount1 = 0; iterCount1 < 25; iterCount1++) {
+    for (int i = 0; i < 25; i += 5) {
         cloud_ori_->clear();
         coeff_sel_->clear();
 
-        find_corresponding_surf_features(iterCount1);
-
+        find_corresponding_surf_features();
         if (cloud_ori_->points.size() < 10)
             continue;
-        if (calculate_suf_transformation(iterCount1) == false)
+        if (calculate_suf_transformation(i) == false)
             break;
     }
 
-    for (int iterCount2 = 0; iterCount2 < 25; iterCount2++) {
+    for (int i = 0; i < 25; i += 5) {
         cloud_ori_->clear();
         coeff_sel_->clear();
 
-        find_corresponding_corner_features(iterCount2);
-
+        find_corresponding_corner_features();
         if (cloud_ori_->points.size() < 10)
             continue;
-        if (calculate_corner_transformation(iterCount2) == false)
+        if (calculate_corner_transformation(i) == false)
             break;
     }
 }
@@ -1305,10 +1284,12 @@ void FeatureAssociation::publish_odometry() {
 void FeatureAssociation::adjust_outlier_cloud() {
     for (auto &p : projected_outlier_cloud_->points)
     {
-        std::array<float, 3> tmp = {p.x, p.y, p.z};
-        point.x = tmp[1];
-        point.y = tmp[2];
-        point.z = tmp[0];
+        float rx = p.x;
+        float ry = p.y;
+        float rz = p.z;
+        point.x = ry;
+        point.y = rz;
+        point.z = rx;
     }
 }
 
@@ -1374,12 +1355,8 @@ void FeatureAssociation::run()
 
     extract_features();
 
-    // cloud for visualization
-    publish_cloud();
+    publish_cloud(); // for visualization
 
-    /**
-    2. Feature Association
-    */
     if (!is_system_inited_) {
         check_system_initialization();
         return;

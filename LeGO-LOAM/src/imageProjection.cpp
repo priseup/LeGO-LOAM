@@ -180,8 +180,9 @@ void ImageProjection::project_point_cloud() {
         point_label_[index] = ImageProjection::PointLabel::valid;
 
         projected_laser_cloud_->points[index] = point;
-        // do nothing, intensity will assign new value in featureAssociation::adjust_distortion()
-        // projected_laser_cloud_->points[index].intensity = row + column / 10000.f;
+        // intensity will add point_time as a new value in featureAssociation::adjust_distortion()
+        // intensity will be row in featureAssociation::find_corresponding_corner/surf_features()
+        projected_laser_cloud_->points[index].intensity = row; //  + column / 10000.f;
 
         projected_laser_cloud_with_intensity_->points[index] = point;
         projected_laser_cloud_with_intensity_->points[index].intensity = range;

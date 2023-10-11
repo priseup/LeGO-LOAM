@@ -53,8 +53,8 @@ private:
     void accumulate_rotation(float cx, float cy, float cz, float lx, float ly, float lz, 
                             float &ox, float &oy, float &oz);
 
-    void find_corresponding_corner_features(int iterCount);
-    void find_corresponding_surf_features(int iterCount);
+    void find_corresponding_corner_features();
+    void find_corresponding_surf_features();
 
     bool calculate_suf_transformation(int iterCount);
 
@@ -104,10 +104,15 @@ private:
     
     void publish_cloud();
 
+    void mark_neibor_is_picked(int idx);
+
+    int find_closest_in_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud);
+    std::array<float, 2> FeatureAssociation::find_closest_in_same_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud);
+    int point_scan_id(const Point &p);
+
 private:
     enum class FeatureLabel
     {
-        unknown,
         surf_flat,
         surf_less_flat,
         corner_sharp,
@@ -236,9 +241,6 @@ private:
     pcl::PointCloud<Point>::Ptr corner_less_sharp_cloud_;
     pcl::PointCloud<Point>::Ptr surf_flat_cloud_;
     pcl::PointCloud<Point>::Ptr surf_less_flat_cloud_;
-
-    pcl::PointCloud<Point>::Ptr surf_less_flat_scan_;
-    pcl::PointCloud<Point>::Ptr surf_less_flat_scan_ds_;
 
     pcl::PointCloud<Point>::Ptr cloud_last_corner_;
     pcl::PointCloud<Point>::Ptr cloud_last_surf_;
