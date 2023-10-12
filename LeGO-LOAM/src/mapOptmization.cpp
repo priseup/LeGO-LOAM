@@ -49,6 +49,30 @@ using namespace gtsam;
 
 class mapOptimization{
 private:
+    struct ImuFrame
+    {
+        double time = 0;
+        float roll = 0;
+        float pitch = 0;
+    };
+
+    struct ImuCache
+    {
+        int after_laser_idx = 0; // first imu newer than laser frame
+        int newest_idx = -1;
+
+        struct ImuFrame imu[imuQueLength];
+
+        int idx_increment(int idx) const
+        {
+            return (idx + 1) % imuQueLength;
+        }
+        int idx_decrement(int idx) const
+        {
+            return (idx + imuQueLength - 1) % imuQueLength;
+        }
+    };
+private:
     gtsam::NonlinearFactorGraph gtsam_graph_;
     gtsam::Values initial_estimate_;
     gtsam::Values optimized_estimate_;
@@ -170,29 +194,6 @@ private:
     float transformBefMapped[6];
     float transformAftMapped[6];
 
-    struct ImuFrame
-    {
-        double time = 0;
-        float roll = 0;
-        float pitch = 0;
-    };
-
-    struct ImuCache
-    {
-        int after_laser_idx = 0; // first imu newer than laser frame
-        int newest_idx = -1;
-
-        struct ImuFrame imu[imuQueLength];
-
-        int idx_increment(int idx) const
-        {
-            return (idx + 1) % imuQueLength;
-        }
-        int idx_decrement(int idx) const
-        {
-            return (idx + imuQueLength - 1) % imuQueLength;
-        }
-    };
     struct ImuCache imu_cache;
 
     std::mutex mutex_;
@@ -420,7 +421,7 @@ public:
                                - (-std::sin(transformTobeMapped[1]) * x2 + std::cos(transformTobeMapped[1]) * z2);
     }
 
-    void transformUpdate()
+    void transform_update()
     {
 		if (imu_cache.newest_idx >= 0) {
 		    float imuRollLast = 0, imuPitchLast = 0;
@@ -710,7 +711,7 @@ public:
         vg_global_map_key_poses_filter_.filter(*global_map_key_poses_ds_);
 
 	    // extract visualized and downsampled key frames
-        for (const auto &p : global_map_key_poses_ds_->points)
+        for (const auto &p : global_map_key_poses_ds_->points) {
 			int i = (int)p.intensity;
 			*global_map_key_frames_ += *transformPointCloud(corner_key_frames_[i],   &key_poses_6d_->points[i]);
 			*global_map_key_frames_ += *transformPointCloud(surf_key_frames_[i],    &key_poses_6d_->points[i]);
@@ -1252,7 +1253,7 @@ public:
                     break;              
             }
 
-            transformUpdate();
+            transform_update();
         }
     }
 

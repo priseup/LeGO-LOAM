@@ -47,10 +47,13 @@ private:
     Point transform_to_start(const Point &p);
     void transform_to_end(Point &p)
 
-    void plugin_imu_rotation(float bcx, float bcy, float bcz, float blx, float bly, float blz, 
-                           float alx, float aly, float alz, float &acx, float &acy, float &acz);
+    void plugin_imu_rotation(const float &bcx, const float &bcy, const float &bcz,
+                            const float &blx, const float &bly, const float &blz, 
+                            const float &alx, const float &aly, const float &alz,
+                            float &acx, float &acy, float &acz);
 
-    void accumulate_rotation(float cx, float cy, float cz, float lx, float ly, float lz, 
+    void accumulate_rotation(const float &cx, const float &cy, const float &cz,
+                            const float &lx, const float &ly, const float &lz, 
                             float &ox, float &oy, float &oz);
 
     void find_corresponding_corner_features();
@@ -96,7 +99,7 @@ private:
     
     void adjust_distortion();
     
-    void calculate_smotthness();
+    void calculate_smoothness();
 
     void mark_occluded_points();
 
@@ -107,7 +110,7 @@ private:
     void mark_neibor_is_picked(int idx);
 
     int find_closest_in_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud);
-    std::array<float, 2> FeatureAssociation::find_closest_in_same_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud);
+    std::array<int, 2> find_closest_in_same_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud, bool get_same);
     int point_scan_id(const Point &p);
 
 private:
@@ -271,8 +274,6 @@ private:
     int *is_neibor_picked_;
     std::vector<FeatureLabel> cloud_label_;
 
-    int frame_count_ = 1;
-    int skip_frame_num_ = 1;
     bool is_system_inited_ = false;
 
     float *pointSearchCornerInd1;

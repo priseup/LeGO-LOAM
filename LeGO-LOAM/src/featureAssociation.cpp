@@ -336,7 +336,7 @@ void FeatureAssociation::adjust_distortion() {
     imu_cache.last_new_idx = imu_cache.newest_idx;
 }
 
-void FeatureAssociation::calculate_smotthness()
+void FeatureAssociation::calculate_smoothness()
 {
     for (int i = 5; i < projected_ground_segment_cloud_->points.size() - 5; i++) {
         const auto &cloud_range = segmented_cloud_msg_.ground_segment_cloud_range; 
@@ -459,6 +459,7 @@ void FeatureAssociation::extract_features()
                     && cloud_curvature_[idx] < surfThreshold) {
                     cloud_label_[idx] = FeatureAssociation::FeatureLabel::surf_flat;
                     surf_flat_cloud_->push_back(projected_ground_segment_cloud_->points[idx]);
+                    surf_less_flat_points->push_back(projected_ground_segment_cloud_->points[idx]);
                     if (surf_flat_cloud_->size() >= 4) {
                         break;
                     }
@@ -517,7 +518,6 @@ void FeatureAssociation::publish_cloud()
 Point FeatureAssociation::transform_to_start(const Point &p)
 {
     float s = 10 * (p.intensity - int(p.intensity));
-
     auto r = rotate_by_zxy(p.x - s * transformCur[3],
                            p.y - s * transformCur[4],
                            p.z - s * transformCur[5],
@@ -567,8 +567,10 @@ void FeaturpooooAssociation::transform_to_end(Point &p)
     p.intensity = (int)p.intensity;
 }
 
-void FeatureAssociation::plugin_imu_rotation(float bcx, float bcy, float bcz, float blx, float bly, float blz, 
-                        float alx, float aly, float alz, float &acx, float &acy, float &acz)
+void FeatureAssociation::plugin_imu_rotation(const float &bcx, const float &bcy, const float &bcz,
+                                            const float &blx, const float &bly, const float &blz, 
+                                            const float &alx, const float &aly, const float &alz,
+                                            float &acx, float &acy, float &acz)
 {
     float sbcx = std::sin(bcx);
     float cbcx = std::cos(bcx);
@@ -628,8 +630,8 @@ void FeatureAssociation::plugin_imu_rotation(float bcx, float bcy, float bcz, fl
 }
 
 void FeatureAssociation::accumulate_rotation(const float &cx, const float &cy, const float &cz,
-                                    const float &lx, const float &ly, const float &lz, 
-                                    float &ox, float &oy, float &oz)
+                                            const float &lx, const float &ly, const float &lz, 
+                                            float &ox, float &oy, float &oz)
 {
     float srx = std::cos(lx)*std::cos(cx)*std::sin(ly)*std::sin(cz) - std::cos(cx)*std::cos(cz)*std::sin(lx) - std::cos(lx)*std::cos(ly)*std::sin(cx);
     ox = -asin(srx);
@@ -651,17 +653,42 @@ int FeatureAssociation::point_scan_id(const Point &p) {
     return int(p.intensity);
 }
 
-void FeatureAssociation::find_closest_in_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud) {
+int FeatureAssociation::find_closest_in_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud) {
+    // why not find nearest point in same/adjacent scan in following codes
+    // int min_idx_same = -1;
+    // int min_idx_adja = -1;
+    // float min_distance_same = nearestFeatureSearchSqDist;
+    // float min_distance_adja = nearestFeatureSearchSqDist;
+    // for (const auto &cp : cloud->points)
+    // {
+    //     if (&cp == &cloud->points[closest_idx])
+    //         continue;
+
+    //     if (point_scan_id(cp) == closest_scan_id) {
+    //         float d = square_distance(cp, p);
+    //         if (d < min_distance_same) {
+    //             min_distance_same = d;
+    //             min_idx_same = i;
+    //         }
+    //     } else if (std::abs(point_scan_id(cp) - closest_scan_id) == 1) {
+    //         float d = square_distance(cp, p);
+    //         if (d < min_distance_adja) {
+    //             min_distance_adja = d;
+    //             min_idx_adja = i;
+    //         }
+    //     }
+    // }
+
     int min_idx = -1;
     float min_distance = nearestFeatureSearchSqDist;
     int closest_scan_id = point_scan_id(cloud->points[closest_idx]);
 
     for (int i = closest_idx + 1; i < cloud->points.size(); i++) {
-        if (point_scan_id(cloud->points[i]) > closest_scan_id + 2.5) { // why > +2.5
+        if (point_scan_id(cloud->points[i]) > closest_scan_id + 2.5) { // why + 2.5
             break;   // why not continue
         }
-        float d = square_distance(cloud->points[i], p);
-        if (point_scan_id(cloud->points[i]) > closest_scan_id) {    // why >
+        if (point_scan_id(cloud->points[i]) > closest_scan_id) { 
+            float d = square_distance(cloud->points[i], p);
             if (d < min_distance) {
                 min_distance = d;
                 min_idx = i;
@@ -673,8 +700,8 @@ void FeatureAssociation::find_closest_in_adjacent_ring(int closest_idx, const Po
             break;  // why not continue
         }
 
-        float d = square_distance(cloud->points[i], p);
         if (point_scan_id(cloud->points[i]) < closest_scan_id) { // why <
+            float d = square_distance(cloud->points[i], p);
             if (d < min_distance) {
                 min_distance = d;
                 min_idx = i;
@@ -684,7 +711,7 @@ void FeatureAssociation::find_closest_in_adjacent_ring(int closest_idx, const Po
 
     return min_idx;
 }
-std::array<float, 2> FeatureAssociation::find_closest_in_same_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud) {
+std::array<int, 2> FeatureAssociation::find_closest_in_same_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud, bool get_same) {
     int min_idx_same = -1;
     int min_idx_adj = -1;
     float min_dis_same = nearestFeatureSearchSqDist;
@@ -697,7 +724,7 @@ std::array<float, 2> FeatureAssociation::find_closest_in_same_adjacent_ring(int 
         }
 
         float d = square_distance(cloud->points[i], p);
-        if (point_scan_id(cloud->points[i]) <= closest_scan_id) {
+        if (get_same && point_scan_id(cloud->points[i]) <= closest_scan_id) {
             if (d < min_dis_same) {
                 min_dis_same = d;
                 min_idx_same = i;
@@ -715,7 +742,7 @@ std::array<float, 2> FeatureAssociation::find_closest_in_same_adjacent_ring(int 
         }
 
         float d = square_distance(cloud->points[i], p);
-        if (point_scan_id(cloud->points[i]) >= closest_scan_id) {
+        if (get_same && point_scan_id(cloud->points[i]) >= closest_scan_id) {
             if (d < min_dis_same) {
                 min_dis_same = d;
                 min_idx_same = i;
@@ -738,8 +765,10 @@ void FeatureAssociation::find_corresponding_corner_features() {
         std::vector<float> closest_square_distances;
         kdtree_last_corner_->nearestKSearch(p, 1, closest_indices, closest_square_distances);
         if (closest_square_distances[0] < nearestFeatureSearchSqDist) {
+            auto ps = find_closest_in_same_adjacent_ring(closest_indices[0], p, cloud_last_corner_, false);
+
             pointSearchCornerInd1[i] = closest_indices[0];
-            pointSearchCornerInd2[i] = find_closest_in_adjacent_ring(closest_indices[0], p, cloud_last_corner_);
+            pointSearchCornerInd2[i] = ps[1]; // ps[0] same scan
         }
 
         if (pointSearchCornerInd2[i] >= 0) {
@@ -793,7 +822,7 @@ void FeatureAssociation::find_corresponding_surf_features() {
         kdtree_last_surf_->nearestKSearch(p, 1, closest_indices, closest_square_distances);
 
         if (closest_square_distances[0] < nearestFeatureSearchSqDist) {
-            auto ps = find_closest_in_same_adjacent_ring(closest_indices[0], p, cloud_last_surf_); 
+            auto ps = find_closest_in_same_adjacent_ring(closest_indices[0], p, cloud_last_surf_, true); 
 
             pointSearchSurfInd1[i] = closest_indices[0];
             pointSearchSurfInd2[i] = ps[0];
@@ -973,7 +1002,6 @@ bool FeatureAssociation::calculate_corner_transformation(int iterCount) {
     float c5 = crx*srz;
 
     for (int i = 0; i < pointSelNum; i++) {
-
         const auto &p = cloud_ori_->points[i];
         const auto &coeff = coeff_sel_->points[i];
 
@@ -1294,8 +1322,8 @@ void FeatureAssociation::adjust_outlier_cloud() {
 }
 
 void FeatureAssociation::publish_cloud_last() {
-    update_imu_rotation_start_sin_cos();
-
+    static int frame_count = 0;
+    // update_imu_rotation_start_sin_cos();
     for (auto &p : corner_less_sharp_cloud_->points) {
         transform_to_end(p);
     }
@@ -1311,9 +1339,7 @@ void FeatureAssociation::publish_cloud_last() {
         kdtree_last_surf_->setInputCloud(cloud_last_surf_);
     }
 
-    frame_count_++;
-    if (frame_count_ >= skip_frame_num_ + 1) {
-        frame_count_ = 0;
+    if (frame_count % 2) {
         adjust_outlier_cloud();
 
         sensor_msgs::PointCloud2 laser_cloud_temp;
@@ -1333,6 +1359,8 @@ void FeatureAssociation::publish_cloud_last() {
         laser_cloud_temp.header.frame_id = "camera";
         pub_last_surf_cloud_.publish(laser_cloud_temp);
     }
+    if (frame_count++ >= 100)
+        frame_count = 0;
 }
 
 void FeatureAssociation::run()
@@ -1349,7 +1377,7 @@ void FeatureAssociation::run()
 
     adjust_distortion();
 
-    calculate_smotthness();
+    calculate_smoothness();
 
     mark_occluded_points();
 
