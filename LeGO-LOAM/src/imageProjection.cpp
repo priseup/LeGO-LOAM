@@ -8,14 +8,14 @@ static int index_in_project_cloud(int row, int col) {
 ImageProjection::ImageProjection(): nh_("~") {
     sub_laser_cloud_ = nh_.subscribe<sensor_msgs::PointCloud2>(pointCloudTopic, 1, &ImageProjection::cloud_handler, this);
 
-    pub_projected_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/full_cloud_projected", 1);
-    pub_projected_cloud_with_intensity_ = nh_.advertise<sensor_msgs::PointCloud2>("/full_cloud_info", 1);
+    pub_projected_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/cloud_projected_with_row", 1);
+    pub_projected_cloud_with_range_ = nh_.advertise<sensor_msgs::PointCloud2>("/cloud_projected_with_range", 1);
 
-    pub_pure_ground_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/ground_cloud", 1);
-    pub_ground_segment_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/segmented_cloud", 1);
-    pub_pure_segmented_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/segmented_cloud_pure", 1);
-    pub_segmented_cloud_info_ = nh_.advertise<cloud_msgs::cloud_info>("/segmented_cloud_info", 1);
     pub_outlier_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/outlier_cloud", 1);
+    pub_pure_ground_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/pure_ground_cloud", 1);
+    pub_pure_segmented_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/pure_segmented_cluster_cloud", 1);
+    pub_ground_segment_cloud_ = nh_.advertise<sensor_msgs::PointCloud2>("/ground_with_segmented_cloud", 1);
+    pub_segmented_cloud_info_ = nh_.advertise<cloud_msgs::cloud_info>("/ground_with_segmented_cloud_info", 1);
 
     init_point_value_.x = std::numeric_limits<float>::quiet_NaN();
     init_point_value_.y = std::numeric_limits<float>::quiet_NaN();
@@ -34,18 +34,18 @@ ImageProjection::ImageProjection(): nh_("~") {
 void ImageProjection::allocate_memory() {
     const int points_num = N_SCAN*Horizon_SCAN;
 
-    laser_cloud_input_.reset(new pcl::PointCloud<Point>);
+    laser_cloud_input_->reset(new pcl::PointCloud<Point>);
 
-    projected_laser_cloud_.reset(new pcl::PointCloud<Point>);
-    projected_laser_cloud_->points.assign(init_point_value_, points_num);
+    projected_laser_cloud_->reset(new pcl::PointCloud<Point>);
+    projected_laser_cloud_->assign(init_point_value_, points_num);
 
-    projected_laser_cloud_with_intensity_.reset(new pcl::PointCloud<Point>);
-    projected_laser_cloud_with_intensity_->points.assign(init_point_value_, points_num);
+    projected_cloud_with_range_->reset(new pcl::PointCloud<Point>);
+    projected_cloud_with_range_->assign(init_point_value_, points_num);
 
-    projected_ground_cloud_.reset(new pcl::PointCloud<Point>);
-    projected_ground_segment_cloud_.reset(new pcl::PointCloud<Point>);
-    projected_pure_segmented_cloud_.reset(new pcl::PointCloud<Point>);
-    projected_outlier_cloud_.reset(new pcl::PointCloud<Point>);
+    projected_pure_ground_cloud_->reset(new pcl::PointCloud<Point>);
+    projected_ground_segment_cloud_->reset(new pcl::PointCloud<Point>);
+    projected_pure_segmented_cloud_->reset(new pcl::PointCloud<Point>);
+    projected_outlier_cloud_->reset(new pcl::PointCloud<Point>);
 
     segmented_cloud_msg_.ring_index_start.assign(N_SCAN, 0);
     segmented_cloud_msg_.ring_index_end.assign(N_SCAN, 0);
@@ -59,9 +59,9 @@ void ImageProjection::allocate_memory() {
 
 void ImageProjection::reset_parameters() {
     laser_cloud_input_->clear();
-    projected_ground_cloud_->clear();
-    projected_ground_segment_cloud_->clear();
+    projected_pure_ground_cloud_->clear();
     projected_pure_segmented_cloud_->clear();
+    projected_ground_segment_cloud_->clear();
     projected_outlier_cloud_->clear();
 
     projected_cloud_range_ = cv::Mat(N_SCAN, Horizon_SCAN, CV_32F, cv::Scalar::all(FLT_MAX));
@@ -70,7 +70,6 @@ void ImageProjection::reset_parameters() {
 }
 
 ~ImageProjection() {
-    std::cout << "test for destructor of ImageProjection" << std::endl;
 }
 
 void ImageProjection::copy_point_cloud(const sensor_msgs::PointCloud2ConstPtr& laser_cloud) {
@@ -92,7 +91,7 @@ void ImageProjection::copy_point_cloud(const sensor_msgs::PointCloud2ConstPtr& l
         laser_cloud_ring_.resize(laser_cloud_input_->points.size());
         for (int i = 0; i < indices.size(); i++)
         {
-            auto &p = cloud_input_with_ring->points[indices[i]];
+            const auto &p = cloud_input_with_ring->points[indices[i]];
             laser_cloud_ring_[i] = p.ring;
         }
     }
@@ -140,12 +139,12 @@ int ImageProjection::point_row(const Point &p, int idx) const {
     if (useCloudRing == true)
         return laser_cloud_ring_[idx];
 
-    float vertical_angle = std::atan2(p.z, sqrt(p.x * p.x + p.y * p.y)) * 180 / M_PI;
+    float vertical_angle = rad2deg(std::atan2(p.z, std::sqrt(p.x * p.x + p.y * p.y)));
     return (vertical_angle + ang_bottom) / laser_resolution_vertical;
 }
 
 int ImageProjection::point_column(const Point &p) const {
-    float horizon_angle = std::atan2(p.x, p.y) * 180 / M_PI;
+    float horizon_angle = rad2deg(std::atan2(p.x, p.y));
     int column = -round((horizon_angle - 90.0) / laser_resolution_horizon) + Horizon_SCAN / 2;
     if (column >= Horizon_SCAN)
         column -= Horizon_SCAN;
@@ -169,7 +168,7 @@ void ImageProjection::project_point_cloud() {
             continue;
         }
 
-        float range = sqrt(point.x * point.x + point.y * point.y + point.z * point.z);
+        float range = laser_range(p);
         if (range < sensorMinimumRange)
         {
             continue;
@@ -184,8 +183,8 @@ void ImageProjection::project_point_cloud() {
         // intensity will be row in featureAssociation::find_corresponding_corner/surf_features()
         projected_laser_cloud_->points[index].intensity = row; //  + column / 10000.f;
 
-        projected_laser_cloud_with_intensity_->points[index] = point;
-        projected_laser_cloud_with_intensity_->points[index].intensity = range;
+        projected_cloud_with_range_->points[index] = point;
+        projected_cloud_with_range_->points[index].intensity = range;
     }
 }
 
@@ -205,7 +204,7 @@ void ImageProjection::extract_ground() {
             float diff_y = projected_laser_cloud_->points[upper_idx].y - projected_laser_cloud_->points[current_idx].y;
             float diff_z = projected_laser_cloud_->points[upper_idx].z - projected_laser_cloud_->points[current_idx].z;
 
-            float angle = std::atan2(diff_z, sqrt(diff_x*diff_x + diff_y*diff_y)) * 180 / M_PI;
+            float angle = rad2deg(std::atan2(diff_z, sqrt(diff_x*diff_x + diff_y*diff_y)));
 
             if (abs(angle - sensorMountAngle) <= 10) {
                 point_label_[current_idx] = ImageProjection::PointLabel::ground;
@@ -219,7 +218,7 @@ void ImageProjection::extract_ground() {
             for (int j = 0; j < Horizon_SCAN; ++j) {
                 int idx = index_in_project_cloud(i, j);
                 if (point_label_[idx] == ImageProjection::PointLabel::ground)
-                    projected_ground_cloud_->push_back(projected_laser_cloud_->points[idx]);
+                    projected_pure_ground_cloud_->push_back(projected_laser_cloud_->points[idx]);
             }
         }
     }
@@ -398,7 +397,7 @@ void ImageProjection::publish_cloud() {
 
     // pure dense ground cloud
     if (pub_pure_ground_cloud_.getNumSubscribers() > 0) {
-        pcl::toROSMsg(*projected_ground_cloud_, laser_cloud_temp);
+        pcl::toROSMsg(*projected_pure_ground_cloud_, laser_cloud_temp);
         laser_cloud_temp.header.stamp = cloud_header_.stamp;
         laser_cloud_temp.header.frame_id = "base_link";
         pub_pure_ground_cloud_.publish(laser_cloud_temp);
@@ -413,11 +412,11 @@ void ImageProjection::publish_cloud() {
     }
 
     // projected full cloud with range as intensity
-    if (pub_projected_cloud_with_intensity_.getNumSubscribers() > 0) {
-        pcl::toROSMsg(*projected_laser_cloud_with_intensity_, laser_cloud_temp);
+    if (pub_projected_cloud_with_range_.getNumSubscribers() > 0) {
+        pcl::toROSMsg(*projected_cloud_with_range_, laser_cloud_temp);
         laser_cloud_temp.header.stamp = cloud_header_.stamp;
         laser_cloud_temp.header.frame_id = "base_link";
-        pub_projected_cloud_with_intensity_.publish(laser_cloud_temp);
+        pub_projected_cloud_with_range_.publish(laser_cloud_temp);
     }
 }
 

@@ -86,7 +86,7 @@ private:
     ros::Subscriber sub_laser_cloud_;
     
     ros::Publisher pub_projected_cloud_;
-    ros::Publisher pub_projected_cloud_with_intensity_;
+    ros::Publisher pub_projected_cloud_with_range_;
 
     ros::Publisher pub_pure_ground_cloud_;
     ros::Publisher pub_ground_segment_cloud_;
@@ -98,7 +98,7 @@ private:
     std::vector<int> laser_cloud_ring_;
 
     pcl::PointCloud<Point>::Ptr projected_laser_cloud_; // projected velodyne raw cloud, but saved in the form of 1-D matrix
-    pcl::PointCloud<Point>::Ptr projected_laser_cloud_with_intensity_; // same as projected_laser_cloud_, but with intensity  range
+    pcl::PointCloud<Point>::Ptr projected_cloud_with_range_; // same as projected_laser_cloud_, but with intensity  range
 
     pcl::PointCloud<Point>::Ptr projected_pure_ground_cloud_;
     pcl::PointCloud<Point>::Ptr projected_ground_segment_cloud_;

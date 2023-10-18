@@ -1,6 +1,14 @@
 #include <cmath>
 #include "lego_math.h"
 
+double rad2deg(double radian) {
+    return radian * 180.0 / M_PI;
+}
+
+double deg2rad(double degree) {
+    return degree * M_PI / 180.0;
+}
+
 double square_distance(const Point &p0, const Point &p1) {
     return (p0.x - p1.x) * (p0.x - p1.y) + (p0.y - p1.y) * (p0.y - p1.y) + (p0.z - p1.z) * (p0.z - p1.z);
 }
@@ -9,7 +17,7 @@ double distance(const Point &p0, const Point &p1) {
     return std::sqrt((p0.x - p1.x) * (p0.x - p1.y) + (p0.y - p1.y) * (p0.y - p1.y) + (p0.z - p1.z) * (p0.z - p1.z));
 }
 
-double laser_range(const Point &p) {
+float laser_range(const Point &p) {
     return std::sqrt(p.x * p.x + p.y * p.y + p.z + p.z);
 }
 
@@ -91,11 +99,11 @@ std::array<float, 3> rotate_by_yxz(const float &x, const float &y, const float &
     return rotate_by_z_axis(r1[0], r1[1], r1[2], cos_yaw, sin_yaw);
 }
 
-float shift_distance_by_vel(const float &vel, const float &time) {
+float shift_vel(const float &vel, const float &time) {
     return vel * time;
 }
 
-float shift_distance_by_acc(const float &acc, const float &time) {
+float shift_acc(const float &acc, const float &time) {
     return acc * time * time / 2;
 }
 

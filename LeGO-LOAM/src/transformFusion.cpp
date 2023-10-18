@@ -49,7 +49,7 @@ private:
     tf::StampedTransform transform_camera_2_baselink_;
     tf::TransformBroadcaster tf_broadcaster_;
 
-    float transform_sum_[6];
+    float transform_from_first_laser_frame_[6];
     float transformIncre[6];
     float transformMapped[6];
     float transformBefMapped[6];
@@ -75,7 +75,7 @@ public:
 
         for (int i = 0; i < 6; ++i)
         {
-            transform_sum_[i] = 0;
+            transform_from_first_laser_frame_[i] = 0;
             transformIncre[i] = 0;
             transformMapped[i] = 0;
             transformBefMapped[i] = 0;
@@ -85,16 +85,16 @@ public:
 
     void transformAssociateToMap()
     {
-        float sbcx = std::sin(transform_sum_[0]);
-        float cbcx = std::cos(transform_sum_[0]);
-        float sbcy = std::sin(transform_sum_[1]);
-        float cbcy = std::cos(transform_sum_[1]);
-        float sbcz = std::sin(transform_sum_[2]);
-        float cbcz = std::cos(transform_sum_[2]);
+        float sbcx = std::sin(transform_from_first_laser_frame_[0]);
+        float cbcx = std::cos(transform_from_first_laser_frame_[0]);
+        float sbcy = std::sin(transform_from_first_laser_frame_[1]);
+        float cbcy = std::cos(transform_from_first_laser_frame_[1]);
+        float sbcz = std::sin(transform_from_first_laser_frame_[2]);
+        float cbcz = std::cos(transform_from_first_laser_frame_[2]);
 
-        auto r0 = rotate_by_yxz(transformBefMapped[3] - transform_sum_[3],
-                                transformBefMapped[4] - transform_sum_[4],
-                                transformBefMapped[5] - transform_sum_[5],
+        auto r0 = rotate_by_yxz(transformBefMapped[3] - transform_from_first_laser_frame_[3],
+                                transformBefMapped[4] - transform_from_first_laser_frame_[4],
+                                transformBefMapped[5] - transform_from_first_laser_frame_[5],
                                 cbcx, -sbcx,
                                 cbcy, -sbcy,
                                 cbcz, -sbcz);
@@ -175,13 +175,13 @@ public:
         geometry_msgs::Quaternion geoQuat = laser_odometry_->pose.pose.orientation;
         tf::Matrix3x3(tf::Quaternion(geoQuat.z, -geoQuat.x, -geoQuat.y, geoQuat.w)).getRPY(roll, pitch, yaw);
 
-        transform_sum_[0] = -pitch;
-        transform_sum_[1] = -yaw;
-        transform_sum_[2] = roll;
+        transform_from_first_laser_frame_[0] = -pitch;
+        transform_from_first_laser_frame_[1] = -yaw;
+        transform_from_first_laser_frame_[2] = roll;
 
-        transform_sum_[3] = laser_odometry_->pose.pose.position.x;
-        transform_sum_[4] = laser_odometry_->pose.pose.position.y;
-        transform_sum_[5] = laser_odometry_->pose.pose.position.z;
+        transform_from_first_laser_frame_[3] = laser_odometry_->pose.pose.position.x;
+        transform_from_first_laser_frame_[4] = laser_odometry_->pose.pose.position.y;
+        transform_from_first_laser_frame_[5] = laser_odometry_->pose.pose.position.z;
 
         transformAssociateToMap();
 

@@ -32,8 +32,24 @@
 //   T. Shan and B. Englot. LeGO-LOAM: Lightweight and Ground-Optimized Lidar Odometry and Mapping on Variable Terrain
 //      IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS). October 2018.
 
-#pragma once
+#ifndef LEGO_FEATURE_ASSOCATION_H_
+#define LEGO_FEATURE_ASSOCATION_H_
 
+#include <array>
+#include <vector>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/range_image/range_image.h>
+#include <pcl/filters/filter.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/kdtree/kdtree_flann.h>
+#include <pcl/common/common.h>
+#include <pcl/registration/icp.h>
+
+#include <tf/transform_broadcaster.h>
+#include <tf/transform_datatypes.h>
 #include "utility.h"
 
 class FeatureAssociation{
@@ -56,14 +72,12 @@ private:
                             const float &lx, const float &ly, const float &lz, 
                             float &ox, float &oy, float &oz);
 
-    void find_corresponding_corner_features();
-    void find_corresponding_surf_features();
+    void find_corresponding_corner_features(int iterCount);
+    void find_corresponding_surf_features(int iterCount);
 
     bool calculate_suf_transformation(int iterCount);
 
     bool calculate_corner_transformation(int iterCount);
-
-    bool calculate_transformation(int iterCount);
 
     void check_system_initialization();
 
@@ -81,7 +95,7 @@ private:
 
     void update_imu_rotation_start_sin_cos();
 
-    void shift_to_start_imu(float point_time);
+    void shift_to_start_imu(const float &point_time);
 
     void vel_to_start_imu();
 
@@ -109,7 +123,6 @@ private:
 
     void mark_neibor_is_picked(int idx);
 
-    int find_closest_in_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud);
     std::array<int, 2> find_closest_in_same_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud, bool get_same);
     int point_scan_id(const Point &p);
 
@@ -146,9 +159,9 @@ private:
         float angular_vel_y = 0.f;
         float angular_vel_z = 0.f;
 
-        float angular_rotation_x = 0.f;
-        float angular_rotation_y = 0.f;
-        float angular_rotation_z = 0.f;
+        float angular_x = 0.f;
+        float angular_y = 0.f;
+        float angular_z = 0.f;
     };
     struct ImuCache
     {
@@ -195,30 +208,39 @@ private:
         float vel_diff_from_start_to_current_y = 0.f;
         float vel_diff_from_start_to_current_z = 0.f;
 
-        float angular_rotation_current_x = 0.f;
-        float angular_rotation_current_y = 0.f;
-        float angular_rotation_current_z = 0.f;
+        float angular_current_x = 0.f;
+        float angular_current_y = 0.f;
+        float angular_current_z = 0.f;
 
-        float last_angular_rotation_x = 0.f;
-        float last_angular_rotation_y = 0.f;
-        float last_angular_rotation_z = 0.f;
+        float last_angular_start_x = 0.f;
+        float last_angular_start_y = 0.f;
+        float last_angular_start_z = 0.f;
 
-        float angular_diff_from_start_to_current_x = 0.f;
-        float angular_diff_from_start_to_current_y = 0.f;
-        float angular_diff_from_start_to_current_z = 0.f;
+        float angular_diff_from_prev_to_current_x = 0.f;
+        float angular_diff_from_prev_to_current_y = 0.f;
+        float angular_diff_from_prev_to_current_z = 0.f;
 
         struct ImuFrame imu_queue[imuQueLength];
 
-        int idx_increment(int idx) const
+        int inc(int idx) const
         {
             return (idx + 1) % imuQueLength;
         }
-        int idx_decrement(int idx) const
+        int dec(int idx) const
         {
             return (idx + imuQueLength - 1) % imuQueLength;
         }
     };
 
+    struct smoothness_t{ 
+        float value;
+        size_t idx;
+
+        bool operator < (const smoothness_t &other) const
+        {
+            return value < other.value;
+        }
+    };
 private:
 	ros::NodeHandle nh_;
 
@@ -247,7 +269,8 @@ private:
 
     pcl::PointCloud<Point>::Ptr cloud_last_corner_;
     pcl::PointCloud<Point>::Ptr cloud_last_surf_;
-    pcl::PointCloud<Point>::Ptr cloud_ori_;
+
+    std::vector<int> cloud_ori_indices_;
     pcl::PointCloud<Point>::Ptr coeff_sel_;
 
     pcl::KdTreeFLANN<Point>::Ptr kdtree_last_corner_;
@@ -255,7 +278,7 @@ private:
 
     pcl::VoxelGrid<Point> voxel_grid_filter_;
 
-    struct ImuCache imu_cache;
+    struct ImuCache imu_cache_;
 
     double laser_scan_time_ = 0;
     double segment_cloud_time_ = 0;
@@ -270,21 +293,21 @@ private:
     std_msgs::Header cloud_header_;
 
     std::vector<smoothness_t> cloud_smoothness_;
-    float *cloud_curvature_;
-    int *is_neibor_picked_;
+    std::vector<float> cloud_curvature_;
+    std::vector<int> is_neibor_picked_;
     std::vector<FeatureLabel> cloud_label_;
 
     bool is_system_inited_ = false;
 
-    float *pointSearchCornerInd1;
-    float *pointSearchCornerInd2;
+    std::vector<int> pointSearchCornerInd1;
+    std::vector<int> pointSearchCornerInd2;
 
-    float *pointSearchSurfInd1;
-    float *pointSearchSurfInd2;
-    float *pointSearchSurfInd3;
+    std::vector<int> pointSearchSurfInd1;
+    std::vector<int> pointSearchSurfInd2;
+    std::vector<int> pointSearchSurfInd3;
 
-    float transformCur[6];
-    float transform_sum_[6];
+    std::array<float, 6> transform_from_prev_laser_frame_ = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+    std::array<float, 6> transform_from_first_laser_frame_ = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
 
     nav_msgs::Odometry laser_odometry_;
 
@@ -294,3 +317,5 @@ private:
     bool is_degenerate_ = false;
     cv::Mat mat_p_;
 };
+
+#endif  // LEGO_FEATURE_ASSOCIATION_H_

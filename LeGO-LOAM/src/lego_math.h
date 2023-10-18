@@ -32,31 +32,28 @@
 //   T. Shan and B. Englot. LeGO-LOAM: Lightweight and Ground-Optimized Lidar Odometry and Mapping on Variable Terrain
 //      IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS). October 2018.
 
-#pragma once
+            transform_last_ = transformAftMapped;
+            transformTobeMapped = transformAftMapped;
+#ifndef LEGO_MATH_H_
+#define LEGO_MATH_H_
 
 #include "utility.h"
 #include <array>
 
 #define PI 3.14159265
 
-double rad2deg(double radian) {
-    return radian * 180.0 / M_PI;
-}
-
-double deg2rad(double degree) {
-    return degree * M_PI / 180.0;
-}
+double rad2deg(double radian);
+double deg2rad(double degree);
 
 double square_distance(const Point &p0, const Point &p1);
 double distance(const Point &p0, const Point &p1);
-double range(const Point &p0);
+float laser_range(const Point &p0);
+float laser_range(const float &x, const float &y, const float &z);
 
-float shift_distance_by_vel(const float &vel, const float &time);
-float shift_distance_by_acc(const float &acc, const float &time);
+float shift_vel(const float &vel, const float &time);
+float shift_acc(const float &acc, const float &time);
 
 float time_liner_interpolation(const float &prev, const float &next, const float &ratio);
-
-float laser_range(const float &x, const float &y, const float &z);
 
 std::array<float, 3> rotate_by_x_axis(const float &x, const float &y, const float &z, const float &roll);
 std::array<float, 3> rotate_by_x_axis(const float &x, const float &y, const float &z, const float &cos_roll, const float &sin_roll);
@@ -79,3 +76,5 @@ std::array<float, 3> rotate_by_yxz(const float &x, const float &y, const float &
                                 const float &cos_roll, const float &sin_roll,
                                 const float &cos_pitch, const float &sin_pitch,
                                 const float &cos_yaw, const float &sin_yaw);
+
+#endif  // LEGO_MATH_H_
