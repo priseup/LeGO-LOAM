@@ -124,25 +124,14 @@ extern const float nearestFeatureSearchSqDist = 25;
 
 
 // Mapping Params
-extern const float surroundingKeyframeSearchRadius = 50.0; // key frame that is within n meters from current pose will be considerd for scan-to-map optimization (when loop closure disabled)
+extern const double surroundingKeyframeSearchRadius = 50.0; // key frame that is within n meters from current pose will be considerd for scan-to-map optimization (when loop closure disabled)
 extern const int   surroundingKeyframeSearchNum = 50; // submap size (when loop closure enabled)
 // history key frames (history submap for loop closure)
-extern const float historyKeyframeSearchRadius = 7.0; // key frame that is within n meters from current pose will be considerd for loop closure
+extern const double historyKeyframeSearchRadius = 7.0; // key frame that is within n meters from current pose will be considerd for loop closure
 extern const int   historyKeyframeSearchNum = 25; // 2n+1 number of hostory key frames will be used into a submap for loop closure
 extern const float historyKeyframeFitnessScore = 0.3; // the smaller the better alignment
 
 extern const float globalMapVisualizationSearchRadius = 500.0; // key frames with in n meters will be visualized
-
-
-struct smoothness_t{ 
-    float value;
-    size_t idx;
-
-    bool operator < (const smoothness_t &other) const
-    {
-        return value < other.value;
-    }
-};
 
 /*
     * A point cloud type that has "ring" channel
