@@ -234,9 +234,8 @@ void ImageProjection::extract_segmentation() {
         }
     }
 
-    int size_of_segment_cloud = 0;
     for (int i = 0; i < N_SCAN; ++i) {
-        segmented_cloud_msg_.ring_index_start[i] = size_of_segment_cloud - 1 + 5;
+        segmented_cloud_msg_.ring_index_start[i] = projected_ground_segment_cloud_->size() - 1 + 5;
         for (int j = 0; j < Horizon_SCAN; ++j) {
             int idx = index_in_project_cloud(i, j);
 
@@ -258,20 +257,18 @@ void ImageProjection::extract_segmentation() {
                     }
                 }
 
-                projected_ground_segment_cloud_->push_back(projected_laser_cloud_->points[idx]);
-
+                int point_idx = projected_ground_segment_cloud_->size();
                 // mark ground points so they will not be considered as edge features later
-                segmented_cloud_msg_.ground_segment_flag[size_of_segment_cloud] = point_label_[idx] == ImageProjection::PointLabel::ground;
+                segmented_cloud_msg_.ground_segment_flag[point_idx] = point_label_[idx] == ImageProjection::PointLabel::ground;
                 // mark the points' column index for marking occlusion later
-                segmented_cloud_msg_.ground_segment_cloud_column[size_of_segment_cloud] = j;
+                segmented_cloud_msg_.ground_segment_cloud_column[point_idx] = j;
                 // save range info
-                segmented_cloud_msg_.ground_segment_cloud_range[size_of_segment_cloud] = projected_cloud_range_.at<float>(i,j);
+                segmented_cloud_msg_.ground_segment_cloud_range[point_idx] = projected_cloud_range_.at<float>(i,j);
 
-                // size of seg cloud
-                ++size_of_segment_cloud;
+                projected_ground_segment_cloud_->push_back(projected_laser_cloud_->points[idx]);
             }
         }
-        segmented_cloud_msg_.ring_index_end[i] = size_of_segment_cloud - 1 - 5;
+        segmented_cloud_msg_.ring_index_end[i] = projected_ground_segment_cloud_->size() - 1 - 5;
     }
 }
 

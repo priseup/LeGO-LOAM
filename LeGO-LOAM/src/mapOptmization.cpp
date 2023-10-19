@@ -124,19 +124,11 @@ private:
     pcl::PointCloud<PointPose>::Ptr key_poses_6d_;
 
     pcl::PointCloud<Point>::Ptr surrounding_key_poses_;
-    pcl::PointCloud<Point>::Ptr surrounding_key_poses_ds_;
 
     pcl::PointCloud<Point>::Ptr cloud_last_corner_; // corner feature set from odoOptimization
-    pcl::PointCloud<Point>::Ptr last_corner_ds_; // downsampled corner featuer set from odoOptimization
-
     pcl::PointCloud<Point>::Ptr cloud_last_surf_; // surf feature set from odoOptimization
-    pcl::PointCloud<Point>::Ptr last_surf_ds_; // downsampled surf featuer set from odoOptimization
-
     pcl::PointCloud<Point>::Ptr cloud_last_outlier_; // corner feature set from odoOptimization
-    pcl::PointCloud<Point>::Ptr last_outlier_ds_; // corner feature set from odoOptimization
-
     pcl::PointCloud<Point>::Ptr last_total_surf_; // surf feature set from odoOptimization
-    pcl::PointCloud<Point>::Ptr last_total_surf_ds_; // downsampled corner featuer set from odoOptimization
 
     std::vector<int> cloud_ori_indices_;
     pcl::PointCloud<Point>::Ptr coeff_sel_;
@@ -160,12 +152,7 @@ private:
 
     pcl::KdTreeFLANN<Point>::Ptr kdtree_global_map_;
     pcl::PointCloud<Point>::Ptr global_map_key_poses_;
-    pcl::PointCloud<Point>::Ptr global_map_key_poses_ds_;
     pcl::PointCloud<Point>::Ptr global_map_key_frames_;
-    pcl::PointCloud<Point>::Ptr global_map_key_frames_ds_;
-
-    std::vector<int> closest_indices_;
-    std::vector<float> closest_square_distances_;
 
     pcl::VoxelGrid<Point> vg_corner_filter_;
     pcl::VoxelGrid<Point> vg_surf_filter_;
@@ -225,8 +212,8 @@ public:
 		parameters.relinearizeSkip = 1;
     	isam_->reset(new ISAM2(parameters));
 
-        pub_key_poses_ = nh_.advertise<sensor_msgs::PointCloud2>("/key_pose_origin", 2);
-        pub_laser_cloud_surround_ = nh_.advertise<sensor_msgs::PointCloud2>("/laser_cloud_surround", 2);
+        pub_key_poses_ = nh_.advertise<sensor_msgs::PointCloud2>("/trajectory", 2);
+        pub_laser_cloud_surround_ = nh_.advertise<sensor_msgs::PointCloud2>("/surround_cloud", 2);
         pub_odom_after_mapped_ = nh_.advertise<nav_msgs::Odometry>("/aft_mapped_to_init", 5);
 
         sub_corner_last_ = nh_.subscribe<sensor_msgs::PointCloud2>("/corner_last", 2, &mapOptimization::corner_last_cloud_handler, this);
@@ -261,22 +248,17 @@ public:
 
     void allocate_memory() {
         key_poses_3d_.reset(new pcl::PointCloud<Point>);
-        key_poses_6d_.reset(new pcl::PointCloud<PointPose>());
+        key_poses_6d_.reset(new pcl::PointCloud<PointPose>);
 
         kdtree_surrounding_key_poses_.reset(new pcl::KdTreeFLANN<Point>);
         kdtree_history_key_poses_.reset(new pcl::KdTreeFLANN<Point>);
 
         surrounding_key_poses_.reset(new pcl::PointCloud<Point>);
-        surrounding_key_poses_ds_.reset(new pcl::PointCloud<Point>);        
 
         cloud_last_corner_.reset(new pcl::PointCloud<Point>); // corner feature set from odoOptimization
         cloud_last_surf_.reset(new pcl::PointCloud<Point>); // surf feature set from odoOptimization
-        last_corner_ds_.reset(new pcl::PointCloud<Point>); // downsampled corner featuer set from odoOptimization
-        last_surf_ds_.reset(new pcl::PointCloud<Point>); // downsampled surf featuer set from odoOptimization
         cloud_last_outlier_.reset(new pcl::PointCloud<Point>); // corner feature set from odoOptimization
-        last_outlier_ds_.reset(new pcl::PointCloud<Point>); // downsampled corner feature set from odoOptimization
         last_total_surf_.reset(new pcl::PointCloud<Point>); // surf feature set from odoOptimization
-        last_total_surf_ds_.reset(new pcl::PointCloud<Point>); // downsampled surf featuer set from odoOptimization
 
         coeff_sel_.reset(new pcl::PointCloud<Point>);
 
@@ -296,9 +278,7 @@ public:
 
         kdtree_global_map_.reset(new pcl::KdTreeFLANN<Point>);
         global_map_key_poses_.reset(new pcl::PointCloud<Point>);
-        global_map_key_poses_ds_.reset(new pcl::PointCloud<Point>);
         global_map_key_frames_.reset(new pcl::PointCloud<Point>);
-        global_map_key_frames_ds_.reset(new pcl::PointCloud<Point>);
 
         gtsam::Vector Vector6(6);
         Vector6 << 1e-6, 1e-6, 1e-6, 1e-8, 1e-8, 1e-6;
@@ -617,7 +597,7 @@ public:
         if (pub_registered_cloud_.getNumSubscribers() != 0) {
             pcl::PointCloud<Point>::Ptr cloud_out(new pcl::PointCloud<Point>);
             PointPose thisPose6D = transform_to_pose(transformTobeMapped);
-            *cloud_out += *transformPointCloud(last_corner_ds_,  thisPose6D);
+            *cloud_out += *transformPointCloud(cloud_last_corner_,  thisPose6D);
             *cloud_out += *transformPointCloud(last_total_surf_, thisPose6D);
             
             pcl::toROSMsg(*cloud_out, laser_cloud_temp);
@@ -634,7 +614,7 @@ public:
             publish_globalmap();
         }
         // save final point cloud
-        pcl::io::savePCDFileASCII(fileDirectory+"finalCloud.pcd", *global_map_key_frames_ds_);
+        pcl::io::savePCDFileASCII(fileDirectory+"finalCloud.pcd", *global_map_key_frames_);
 
         string cornerMapString = "/tmp/cornerMap.pcd";
         string surfaceMapString = "/tmp/surfaceMap.pcd";
@@ -680,28 +660,26 @@ public:
             global_map_key_poses_->push_back(key_poses_3d_->points[i]);
         }
         vg_global_map_key_poses_filter_.setInputCloud(global_map_key_poses_);
-        vg_global_map_key_poses_filter_.filter(*global_map_key_poses_ds_);
+        vg_global_map_key_poses_filter_.filter(*global_map_key_poses_);
 
 	    // extract visualized and downsampled key frames
-        for (const auto &p : global_map_key_poses_ds_->points) {
+        for (const auto &p : global_map_key_poses_->points) {
 			int i = (int)p.intensity;
 			*global_map_key_frames_ += *transformPointCloud(corner_key_frames_[i], key_poses_6d_->points[i]);
 			*global_map_key_frames_ += *transformPointCloud(surf_key_frames_[i], key_poses_6d_->points[i]);
 			*global_map_key_frames_ += *transformPointCloud(outlier_key_frames_[i], key_poses_6d_->points[i]);
         }
         vg_global_map_key_frames_filter_.setInputCloud(global_map_key_frames_);
-        vg_global_map_key_frames_filter_.filter(*global_map_key_frames_ds_);
+        vg_global_map_key_frames_filter_.filter(*global_map_key_frames_);
  
         sensor_msgs::PointCloud2 laser_cloud_temp;
-        pcl::toROSMsg(*global_map_key_frames_ds_, laser_cloud_temp);
+        pcl::toROSMsg(*global_map_key_frames_, laser_cloud_temp);
         laser_cloud_temp.header.stamp = ros::Time().fromSec(time_odom_);
         laser_cloud_temp.header.frame_id = "camera_init";
         pub_laser_cloud_surround_.publish(laser_cloud_temp);  
 
         global_map_key_poses_->clear();
-        global_map_key_poses_ds_->clear();
-        global_map_key_frames_->clear();
-        // global_map_key_frames_ds_->clear();     
+        // global_map_key_frames_->clear();
     }
 
     void loop_closure_thread() {
@@ -895,23 +873,22 @@ public:
                 }
     	}else{
             surrounding_key_poses_->clear();
-            surrounding_key_poses_ds_->clear();
     	    // extract all the nearby key poses and downsample them
             std::vector<int> closest_indices;
             std::vector<float> closest_square_distances;
     	    kdtree_surrounding_key_poses_->setInputCloud(key_poses_3d_);
     	    kdtree_surrounding_key_poses_->radiusSearch(current_pose_, surroundingKeyframeSearchRadius, closest_indices, closest_square_distances);
     	    for (int i : closest_indices) {
-                surrounding_key_poses_->points.push_back(key_poses_3d_->points[i]);
+                surrounding_key_poses_->push_back(key_poses_3d_->points[i]);
             }
     	    vg_surrounding_key_poses_filter_.setInputCloud(surrounding_key_poses_);
-    	    vg_surrounding_key_poses_filter_.filter(*surrounding_key_poses_ds_);
+    	    vg_surrounding_key_poses_filter_.filter(*surrounding_key_poses_);
 
     	    // delete key frames that are not in surrounding region
             std::set<int> delete_indices;
             // for (int i = 0; i < surrounding_existing_key_poses_id_.size(); i++) {
             //     bool is_exist = false;
-            //     for (auto &p : surrounding_key_poses_ds_->points) {
+            //     for (auto &p : surrounding_key_poses_->points) {
             //         if ((int)p.intensity == surrounding_existing_key_poses_id_[i]) {
             //             is_exist = true;
             //             break;
@@ -922,7 +899,7 @@ public:
             //     }
             // }
             for (int i = 0; i < surrounding_existing_key_poses_id_.size(); i++) {
-                const auto &indices = surrounding_key_poses_ds_->points;
+                const auto &indices = surrounding_key_poses_->points;
                 if (std::find(indices.begin(), indices.end(), surrounding_existing_key_poses_id_[i])) == indice.begin())
                 {
                     delete_indices.insert(i);
@@ -939,7 +916,7 @@ public:
             delete_indices.clear();
 
     	    // add new key frames that are not in calculated existing key frames
-            for (const auto &p : surrounding_key_poses_ds_->points) {
+            for (const auto &p : surrounding_key_poses_->points) {
                 int idx = (int)p.inensity;
                 if (surrounding_existing_key_poses_id_.find(idx) == surrounding_existing_key_poses_id_.end()) {
                     update_transform_sin_cos(key_poses_6d_->points[idx]);
@@ -967,24 +944,24 @@ public:
 
     void downsample_current_scan() {
         vg_corner_filter_.setInputCloud(cloud_last_corner_);
-        vg_corner_filter_.filter(*last_corner_ds_);
+        vg_corner_filter_.filter(*cloud_last_corner_);
 
         vg_surf_filter_.setInputCloud(cloud_last_surf_);
-        vg_surf_filter_.filter(*last_surf_ds_);
+        vg_surf_filter_.filter(*cloud_last_surf_);
 
         vg_outlier_filter_.setInputCloud(cloud_last_outlier_);
-        vg_outlier_filter_.filter(*last_outlier_ds_);
+        vg_outlier_filter_.filter(*cloud_last_outlier_);
 
-        *last_total_surf_ += *last_surf_ds_;
-        *last_total_surf_ += *last_outlier_ds_;
+        *last_total_surf_ += *cloud_last_surf_;
+        *last_total_surf_ += *cloud_last_outlier_;
         vg_surf_filter_.setInputCloud(last_total_surf_);
-        vg_surf_filter_.filter(*last_total_surf_ds_);
+        vg_surf_filter_.filter(*last_total_surf_);
     }
 
     void corner_optimization() {
         updatePointAssociateToMapSinCos();
-        for (int i = 0; i < last_corner_ds_->points.size(); i++) {
-            const auto &p = last_corner_ds_->points[i];
+        for (int i = 0; i < cloud_last_corner_->size(); i++) {
+            const auto &p = cloud_last_corner_->points[i];
             auto p_map = pointAssociateToMap(p);
 
             std::vector<int> closest_indices;
@@ -1067,8 +1044,8 @@ public:
 
     void surf_optimization() {
         updatePointAssociateToMapSinCos();
-        for (int i = 0; i < last_total_surf_ds_->points.size(); i++) {
-            const auto &p = last_total_surf_ds_->points[i];
+        for (int i = 0; i < last_total_surf_->size(); i++) {
+            const auto &p = last_total_surf_->points[i];
             auto p_map = pointAssociateToMap(p); 
             std::vector<int> closest_indices;
             std::vector<float> closest_square_distances;
@@ -1076,9 +1053,9 @@ public:
 
             if (closest_square_distances.back() < 1.0) {
                 for (int j = 0; j < 5; j++) {
-                    matA0.at<float>(j, 0) = surf_map_ds_->points[closest_indices_[j]].x;
-                    matA0.at<float>(j, 1) = surf_map_ds_->points[closest_indices_[j]].y;
-                    matA0.at<float>(j, 2) = surf_map_ds_->points[closest_indices_[j]].z;
+                    matA0.at<float>(j, 0) = surf_map_ds_->points[closest_indices[j]].x;
+                    matA0.at<float>(j, 1) = surf_map_ds_->points[closest_indices[j]].y;
+                    matA0.at<float>(j, 2) = surf_map_ds_->points[closest_indices[j]].z;
                 }
                 cv::solve(matA0, matB0, matX0, cv::DECOMP_QR);
 
@@ -1092,9 +1069,9 @@ public:
 
                 bool planeValid = true;
                 for (int j = 0; j < 5; j++) {
-                    if (fabs(pa * surf_map_ds_->points[closest_indices_[j]].x +
-                             pb * surf_map_ds_->points[closest_indices_[j]].y +
-                             pc * surf_map_ds_->points[closest_indices_[j]].z + pd) > 0.2) {
+                    if (fabs(pa * surf_map_ds_->points[closest_indices[j]].x +
+                             pb * surf_map_ds_->points[closest_indices[j]].y +
+                             pc * surf_map_ds_->points[closest_indices[j]].z + pd) > 0.2) {
                         planeValid = false;
                         break;
                     }
@@ -1252,7 +1229,7 @@ public:
 
         prev_pose_ = current_pose_;
         /**
-         * update grsam graph
+         * update gtsam graph
          */
         if (key_poses_3d_->points.empty()) {
             gtsam::Pose3 gpose(Rot3::RzRyRx(transformTobeMapped[2], transformTobeMapped[0], transformTobeMapped[1]),
@@ -1287,7 +1264,7 @@ public:
         pose_3d.x = latestEstimate.translation().y();
         pose_3d.y = latestEstimate.translation().z();
         pose_3d.z = latestEstimate.translation().x();
-        pose_3d.intensity = key_poses_3d_->points.size(); // this can be used as index
+        pose_3d.intensity = key_poses_3d_->size(); // this can be used as index
         key_poses_3d_->push_back(pose_3d);
 
         PointPose pose_6d;
@@ -1315,9 +1292,9 @@ public:
             transformTobeMapped = transformAftMapped;
         }
 
-        corner_key_frames_.push_back(last_corner_ds_->makeShared());
-        surf_key_frames_.push_back(last_surf_ds_->makeShared());
-        outlier_key_frames_.push_back(last_outlier_ds_->makeShared());
+        corner_key_frames_.push_back(cloud_last_corner_->makeShared());
+        surf_key_frames_.push_back(cloud_last_surf_->makeShared());
+        outlier_key_frames_.push_back(cloud_last_outlier_->makeShared());
     }
 
     void correct_poses() {

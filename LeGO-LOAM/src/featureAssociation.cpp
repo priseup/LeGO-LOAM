@@ -1086,7 +1086,8 @@ void FeatureAssociation::update_transformation() {
 void FeatureAssociation::integrate_transformation() {
     float rx, ry, rz;
     accumulate_rotation(transform_from_first_laser_frame_[0], transform_from_first_laser_frame_[1], transform_from_first_laser_frame_[2], 
-                        -transform_from_prev_laser_frame_[0], -transform_from_prev_laser_frame_[1], -transform_from_prev_laser_frame_[2], rx, ry, rz);
+                        -transform_from_prev_laser_frame_[0], -transform_from_prev_laser_frame_[1], -transform_from_prev_laser_frame_[2],
+                        rx, ry, rz);
 
     auto r = rotate_by_zxy(transform_from_prev_laser_frame_[3] - imu_cache_.drift_from_start_to_current_x,
                            transform_from_prev_laser_frame_[4] - imu_cache_.drift_from_start_to_current_y,
