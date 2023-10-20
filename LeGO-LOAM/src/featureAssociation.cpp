@@ -1,6 +1,7 @@
 #include <cmath>
 #include "utility.h"
 #include "lego_math.h"
+#include "featureAssociation.h"
 
 FeatureAssociation::FeatureAssociation(): nh_("~") {
     sub_laser_cloud_ = nh_.subscribe<sensor_msgs::PointCloud2>("/ground_with_segmented_cloud", 1, &FeatureAssociation::laser_cloud_handler, this);
@@ -20,6 +21,7 @@ FeatureAssociation::FeatureAssociation(): nh_("~") {
 
     cloud_last_corner_.reset(new pcl::PointCloud<Point>);
     cloud_last_surf_.reset(new pcl::PointCloud<Point>);
+
     coeff_sel_.reset(new pcl::PointCloud<Point>);
 
     kdtree_last_corner_.reset(new pcl::KdTreeFLANN<Point>);
@@ -77,7 +79,7 @@ void FeatureAssociation::shift_to_start_imu(const float &point_time)
     imu_cache_.drift_from_start_to_current_y = imu_cache_.shift_current_y - imu_cache_.shift_start_y - imu_cache_.vel_start_y * point_time;
     imu_cache_.drift_from_start_to_current_z = imu_cache_.shift_current_z - imu_cache_.shift_start_z - imu_cache_.vel_start_z * point_time;
 
-    auto r0 = rotate_by_yxz_(imu_cache_.drift_from_start_to_current_x,
+    auto r0 = rotate_by_yxz(imu_cache_.drift_from_start_to_current_x,
                             imu_cache_.drift_from_start_to_current_y,
                             imu_cache_.drift_from_start_to_current_z,
                             imu_cache_.pitch_start_cos,
@@ -121,9 +123,9 @@ void FeatureAssociation::transform_to_start_imu(Point &p)
                             imu_cache_.yaw_start_cos, -imu_cache_.yaw_start_sin,
                             imu_cache_.roll_start_cos, -imu_cache_.roll_start_sin);
 
-    p->x = r1[0] + imu_cache_.drift_from_start_to_current_x;
-    p->y = r1[1] + imu_cache_.drift_from_start_to_current_y;
-    p->z = r1[2] + imu_cache_.drift_from_start_to_current_z;
+    p.x = r1[0] + imu_cache_.drift_from_start_to_current_x;
+    p.y = r1[1] + imu_cache_.drift_from_start_to_current_y;
+    p.z = r1[2] + imu_cache_.drift_from_start_to_current_z;
 }
 
 void FeatureAssociation::accumulate_imu_shift_rotation()
@@ -377,12 +379,12 @@ void FeatureAssociation::mark_neibor_is_picked(int idx)
 {
     const auto &cloud_column = segmented_cloud_msg_.ground_segment_cloud_column;
     for (int i = 1; i <= 5; i++) {
-        if (std::abs(cloud_column[idx + i] - cloud_column[idx + i - 1]) > 10)
+        if (std::abs(int(cloud_column[idx + i] - cloud_column[idx + i - 1])) > 10)
             break;
         is_neibor_picked_[idx + i] = 1;
     }
     for (int i = -1; i >= -5; i--) {
-        if (std::abs(cloud_column[idx + i] - cloud_column[idx + i + 1]) > 10)
+        if (std::abs(int(cloud_column[idx + i] - cloud_column[idx + i + 1])) > 10)
             break;
         is_neibor_picked_[idx + i] = 1;
     }
@@ -513,7 +515,7 @@ Point FeatureAssociation::transform_to_start(const Point &p)
     return po;
 }
 
-void FeaturpooooAssociation::transform_to_end(Point &p)
+void FeatureAssociation::transform_to_end(Point &p)
 {
     Point po = transform_to_start(p);
 
@@ -698,8 +700,8 @@ std::array<int, 2> FeatureAssociation::find_closest_in_same_adjacent_ring(int cl
 
 void FeatureAssociation::find_corresponding_corner_features(int iterCount) {
     for (int i = 0; i < corner_sharp_cloud_->points.size(); i++) {
+        auto p = transform_to_start(corner_sharp_cloud_->points[i]);
         if (iterCount % 5 == 0) {
-            auto p = transform_to_start(corner_sharp_cloud_->points[i]);
             std::vector<int> closest_indices;
             std::vector<float> closest_square_distances;
             kdtree_last_corner_->nearestKSearch(p, 1, closest_indices, closest_square_distances);
@@ -745,7 +747,7 @@ void FeatureAssociation::find_corresponding_corner_features(int iterCount) {
                 Point coeff;
                 coeff.x = s * la;
                 coeff.y = s * lb;
-                coeff.z = s * sc;
+                coeff.z = s * lc;
                 coeff.intensity = s * ld2;
                 coeff_sel_->push_back(coeff);
                 cloud_ori_indices_.push_back(i);
@@ -756,8 +758,8 @@ void FeatureAssociation::find_corresponding_corner_features(int iterCount) {
 
 void FeatureAssociation::find_corresponding_surf_features(int iterCount) {
     for (int i = 0; i < surf_flat_cloud_->points.size(); i++) {
+        auto p = transform_to_start(surf_flat_cloud_->points[i]);
         if (iterCount % 5 == 0) {
-            auto p = transform_to_start(surf_flat_cloud_->points[i]);
             std::vector<int> closest_indices;
             std::vector<float> closest_square_distances;
             kdtree_last_surf_->nearestKSearch(p, 1, closest_indices, closest_square_distances);
@@ -849,7 +851,7 @@ bool FeatureAssociation::calculate_suf_transformation(int iterCount) {
                     + (a5*p.x - a6*p.y + crx*p.z + a7) * coeff.y
                     + (a8*p.x - a9*p.y - a10*p.z + a11) * coeff.z;
 
-        float arz = (c1*p.x + c2*p.y + c3) * .x
+        float arz = (c1*p.x + c2*p.y + c3) * coeff.x
                     + (c4*p.x - c5*p.y + c6) * coeff.y
                     + (c7*p.x + c8*p.y + c9) * coeff.z;
 
@@ -1135,9 +1137,9 @@ void FeatureAssociation::adjust_outlier_cloud() {
         float rx = p.x;
         float ry = p.y;
         float rz = p.z;
-        point.x = ry;
-        point.y = rz;
-        point.z = rx;
+        p.x = ry;
+        p.y = rz;
+        p.z = rx;
     }
 }
 

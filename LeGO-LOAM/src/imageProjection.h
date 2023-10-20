@@ -40,13 +40,12 @@
 class ImageProjection{
 public:
     ImageProjection();
-    ~ImageProjection();
 
     void cloud_handler(const sensor_msgs::PointCloud2ConstPtr& laser_cloud);
 
 private:
     // Convert ros message to pcl point cloud
-    void copy_point_cloud(laser_cloud);
+    void copy_point_cloud(const sensor_msgs::PointCloud2ConstPtr &laser_cloud);
 
     // Start and end angle of a scan
     void calculate_orientation();
@@ -62,6 +61,8 @@ private:
 
     // Publish all clouds
     void publish_cloud();
+
+    void allocate_memory();
 
     // Reset parameters for next iteration
     void reset_parameters();

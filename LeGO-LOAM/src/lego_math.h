@@ -32,8 +32,6 @@
 //   T. Shan and B. Englot. LeGO-LOAM: Lightweight and Ground-Optimized Lidar Odometry and Mapping on Variable Terrain
 //      IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS). October 2018.
 
-            transform_last_ = transformAftMapped;
-            transformTobeMapped = transformAftMapped;
 #ifndef LEGO_MATH_H_
 #define LEGO_MATH_H_
 
@@ -53,7 +51,7 @@ float laser_range(const float &x, const float &y, const float &z);
 float shift_vel(const float &vel, const float &time);
 float shift_acc(const float &acc, const float &time);
 
-float time_liner_interpolation(const float &prev, const float &next, const float &ratio);
+float interpolation_by_linear(const float &prev, const float &next, const float &ratio);
 
 std::array<float, 3> rotate_by_x_axis(const float &x, const float &y, const float &z, const float &roll);
 std::array<float, 3> rotate_by_x_axis(const float &x, const float &y, const float &z, const float &cos_roll, const float &sin_roll);

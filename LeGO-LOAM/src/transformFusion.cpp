@@ -49,11 +49,11 @@ private:
     tf::StampedTransform transform_camera_2_baselink_;
     tf::TransformBroadcaster tf_broadcaster_;
 
-    float transform_from_first_laser_frame_[6];
-    float transformIncre[6];
-    float transformMapped[6];
-    float transformBefMapped[6];
-    float transformAftMapped[6];
+    std::array<float, 6> transform_from_first_laser_frame_ = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+    std::array<float, 6> transformIncre = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+    std::array<float, 6> transformMapped = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+    std::array<float, 6> transformBefMapped = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+    std::array<float, 6> transformAftMapped = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
 
 public:
     TransformFusion() {
@@ -72,15 +72,6 @@ public:
 
         transform_camera_2_baselink_.frame_id_ = "camera";
         transform_camera_2_baselink_.child_frame_id_ = "base_link";
-
-        for (int i = 0; i < 6; ++i)
-        {
-            transform_from_first_laser_frame_[i] = 0;
-            transformIncre[i] = 0;
-            transformMapped[i] = 0;
-            transformBefMapped[i] = 0;
-            transformAftMapped[i] = 0;
-        }
     }
 
     void transformAssociateToMap()
@@ -229,7 +220,7 @@ public:
 };
 
 
-int main(int argc, const char **argv)
+int main(int argc, char **argv)
 {
     ros::init(argc, argv, "lego_loam");
     

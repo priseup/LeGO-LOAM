@@ -60,7 +60,7 @@ private:
         int after_laser_idx = 0; // first imu newer than laser frame
         int newest_idx = -1;
 
-        struct ImuFrame imu[imuQueLength];
+        struct ImuFrame imu_queue[imuQueLength];
 
         int inc(int idx) const
         {
@@ -128,9 +128,9 @@ private:
     pcl::PointCloud<Point>::Ptr cloud_last_corner_; // corner feature set from odoOptimization
     pcl::PointCloud<Point>::Ptr cloud_last_surf_; // surf feature set from odoOptimization
     pcl::PointCloud<Point>::Ptr cloud_last_outlier_; // corner feature set from odoOptimization
-    pcl::PointCloud<Point>::Ptr last_total_surf_; // surf feature set from odoOptimization
+    pcl::PointCloud<Point>::Ptr cloud_laster_surf_outlier_; // surf feature set from odoOptimization
 
-    std::vector<int> cloud_ori_indices_;
+    pcl::PointCloud<Point>::Ptr cloud_ori_;
     pcl::PointCloud<Point>::Ptr coeff_sel_;
 
     pcl::PointCloud<Point>::Ptr corner_map_;
@@ -208,9 +208,9 @@ public:
     mapOptimization(): nh_("~")
     {
     	gtsam::ISAM2Params parameters;
-		parameters.relinearizeThreshold = 0.01;
-		parameters.relinearizeSkip = 1;
-    	isam_->reset(new ISAM2(parameters));
+      parameters.relinearizeThreshold = 0.01;
+      parameters.relinearizeSkip = 1;
+    	isam_ = std::make_unique<gtsam::ISAM2>(gtsam::ISAM2(parameters));
 
         pub_key_poses_ = nh_.advertise<sensor_msgs::PointCloud2>("/trajectory", 2);
         pub_laser_cloud_surround_ = nh_.advertise<sensor_msgs::PointCloud2>("/surround_cloud", 2);
@@ -258,8 +258,9 @@ public:
         cloud_last_corner_.reset(new pcl::PointCloud<Point>); // corner feature set from odoOptimization
         cloud_last_surf_.reset(new pcl::PointCloud<Point>); // surf feature set from odoOptimization
         cloud_last_outlier_.reset(new pcl::PointCloud<Point>); // corner feature set from odoOptimization
-        last_total_surf_.reset(new pcl::PointCloud<Point>); // surf feature set from odoOptimization
+        cloud_laster_surf_outlier_.reset(new pcl::PointCloud<Point>); // surf feature set from odoOptimization
 
+        cloud_ori_.reset(new pcl::PointCloud<Point>);
         coeff_sel_.reset(new pcl::PointCloud<Point>);
 
         corner_map_.reset(new pcl::PointCloud<Point>);
@@ -381,20 +382,20 @@ public:
 		    float imu_roll_current = 0;
             float imu_pitch_current = 0;
 		    while (imu_cache_.after_laser_idx != imu_cache_.newest_idx) {
-		        if (time_odom_ + scanPeriod < imu_cache_.imu[imu_cache_.after_laser_idx].time) {
+		        if (time_odom_ + scanPeriod < imu_cache_.imu_queue[imu_cache_.after_laser_idx].time) {
 		            break;
 		        }
 		        imu_cache_.after_laser_idx = imu_cache_.inc(imu_cache_.after_laser_idx);
 		    }
 
-            const auto &imu_after_laser = imu_cache_.imu[imu_cache_.after_laser_idx];
+            const auto &imu_after_laser = imu_cache_.imu_queue[imu_cache_.after_laser_idx];
 		    if (time_odom_ + scanPeriod > imu_after_laser.time) {
 		        imu_roll_current = imu_after_laser.roll;
 		        imu_pitch_current = imu_after_laser.pitch;
 		    } else {
                 int before_laser_idx = imu_cache_.dec(imu_cache_.after_laser_idx);
                 const auto &imu_before_laser = imu_cache_.imu_queue[before_laser_idx];
-                float ratio_from_start = (time_odom_ + scanPeriod - imu_before_laser.time) 
+                float ratio_from_start = (time_odom_ + scanPeriod - imu_before_laser.time);
                 imu_roll_current = interpolation_by_linear(imu_before_laser.roll, imu_after_laser.roll, ratio_from_start);
                 imu_pitch_current = interpolation_by_linear(imu_before_laser.pitch, imu_after_laser.pitch, ratio_from_start);
 		    }
@@ -424,7 +425,7 @@ public:
 
     Point pointAssociateToMap(const Point &p)
     {
-        auto r = rotate_by_zxy(pi.x, pi.y, pi.z,
+        auto r = rotate_by_zxy(p.x, p.y, p.z,
                                 cRoll, sRoll,
                                 cPitch, sPitch,
                                 cYaw, sYaw);
@@ -433,7 +434,7 @@ public:
         po.x = r[0] + tX;
         po.y = r[1] + tY;
         po.z = r[2] + tZ;
-        po.intensity = pi.intensity;
+        po.intensity = p.intensity;
 
         return po;
     }
@@ -486,13 +487,13 @@ public:
             auto &po = cloud_out->points[i];
 
             auto r = rotate_by_zxy(p.x, p.y, p.z,
-                                pose->roll,
-                                pose->pitch,
-                                pose->yaw);
+                                pose.roll,
+                                pose.pitch,
+                                pose.yaw);
 
-            po.x = r[0] + pose->x;
-            po.y = r[1] + pose->y;
-            po.z = r[2] + pose->z;
+            po.x = r[0] + pose.x;
+            po.y = r[1] + pose.y;
+            po.z = r[2] + pose.z;
             po.intensity = p.intensity;
         }
         return cloud_out;
@@ -521,10 +522,10 @@ public:
         double roll, pitch, yaw;
         geometry_msgs::Quaternion geoQuat = odom->pose.pose.orientation;
         tf::Matrix3x3(tf::Quaternion(geoQuat.z, -geoQuat.x, -geoQuat.y, geoQuat.w)).getRPY(roll, pitch, yaw);
-        transform_from_first_laser_frame_ = {-pitch, -yaw, roll,
-                                            odom->pose.pose.position.x,
-                                            odom->pose.pose.position.y,
-                                            odom->pose.pose.position.z};
+        transform_from_first_laser_frame_ = {-(float)pitch, -(float)yaw, (float)roll,
+                                            float(odom->pose.pose.position.x),
+                                            float(odom->pose.pose.position.y),
+                                            float(odom->pose.pose.position.z)};
 
         has_get_laser_odom_ = true;
     }
@@ -536,9 +537,9 @@ public:
         tf::Matrix3x3(orientation).getRPY(roll, pitch, yaw);
 
         imu_cache_.newest_idx = imu_cache_.inc(imu_cache_.newest_idx);
-        imu_cache_.imu_queue[newest_idx].time = imuIn->header.stamp.toSec();
-        imu_cache_.imu_queue[newest_idx].roll = roll;
-        imu_cache_.imu_queue[newest_idx].pitch = pitch;
+        imu_cache_.imu_queue[imu_cache_.newest_idx].time = imuIn->header.stamp.toSec();
+        imu_cache_.imu_queue[imu_cache_.newest_idx].roll = roll;
+        imu_cache_.imu_queue[imu_cache_.newest_idx].pitch = pitch;
     }
 
     void publish_tf() {
@@ -598,7 +599,7 @@ public:
             pcl::PointCloud<Point>::Ptr cloud_out(new pcl::PointCloud<Point>);
             PointPose thisPose6D = transform_to_pose(transformTobeMapped);
             *cloud_out += *transformPointCloud(cloud_last_corner_,  thisPose6D);
-            *cloud_out += *transformPointCloud(last_total_surf_, thisPose6D);
+            *cloud_out += *transformPointCloud(cloud_laster_surf_outlier_, thisPose6D);
             
             pcl::toROSMsg(*cloud_out, laser_cloud_temp);
             laser_cloud_temp.header.stamp = ros::Time().fromSec(time_odom_);
@@ -793,7 +794,8 @@ public:
         	get pose constraint
         	*/
         float x, y, z, roll, pitch, yaw;
-        Eigen::Affine3f correctionCameraFrame = icp.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
+        Eigen::Affine3f correctionCameraFrame;
+        correctionCameraFrame = icp.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
         pcl::getTranslationAndEulerAngles(correctionCameraFrame, x, y, z, roll, pitch, yaw);
         Eigen::Affine3f correctionLidarFrame = pcl::getTransformation(z, x, y, yaw, roll, pitch);
         // transform from world origin to wrong pose
@@ -801,11 +803,11 @@ public:
         // transform from world origin to corrected pose
         Eigen::Affine3f tCorrect = correctionLidarFrame * tWrong; // pre-multiplying -> successive rotation about a fixed frame
         pcl::getTranslationAndEulerAngles(tCorrect, x, y, z, roll, pitch, yaw);
-        gtsam::Pose3 poseFrom = gtsam::Pose3(gtsam::Rot3::RzRyRx(roll, pitch, yaw), Point3(x, y, z));
+        gtsam::Pose3 poseFrom = gtsam::Pose3(gtsam::Rot3::RzRyRx(roll, pitch, yaw), gtsam::Point3(x, y, z));
         gtsam::Pose3 poseTo = point_to_gtpose(key_poses_6d_->points[closest_history_frame_id_]);
         gtsam::Vector Vector6(6);
         float noise_score = icp.getFitnessScore();
-        gtsam::Vector6 << noise_score, noise_score, noise_score, noise_score, noise_score, noise_score;
+        Vector6 << noise_score, noise_score, noise_score, noise_score, noise_score, noise_score;
         constraint_noise_ = gtsam::noiseModel::Diagonal::Variances(Vector6);
         /* 
         	add constraints
@@ -821,7 +823,7 @@ public:
 
     gtsam::Pose3 point_to_gtpose(const PointPose &p) { // camera frame to lidar frame
     	return gtsam::Pose3(gtsam::Rot3::RzRyRx(double(p.yaw), double(p.roll), double(p.pitch)),
-                           Point3(double(p.z), double(p.x), double(p.y)));
+                           gtsam::Point3(double(p.z), double(p.x), double(p.y)));
     }
 
     Eigen::Affine3f pclPointToAffine3fCameraToLidar(PointPose thisPoint) { // camera frame to lidar frame
@@ -886,39 +888,33 @@ public:
 
     	    // delete key frames that are not in surrounding region
             std::set<int> delete_indices;
-            // for (int i = 0; i < surrounding_existing_key_poses_id_.size(); i++) {
-            //     bool is_exist = false;
-            //     for (auto &p : surrounding_key_poses_->points) {
-            //         if ((int)p.intensity == surrounding_existing_key_poses_id_[i]) {
-            //             is_exist = true;
-            //             break;
-            //         }
-            //     }
-            //     if (!is_exist) {
-            //         delete_indices.insert(i);
-            //     }
-            // }
             for (int i = 0; i < surrounding_existing_key_poses_id_.size(); i++) {
-                const auto &indices = surrounding_key_poses_->points;
-                if (std::find(indices.begin(), indices.end(), surrounding_existing_key_poses_id_[i])) == indice.begin())
-                {
-                    delete_indices.insert(i);
-                }
+               bool is_exist = false;
+               for (auto &p : surrounding_key_poses_->points) {
+                   if ((int)p.intensity == surrounding_existing_key_poses_id_[i]) {
+                       is_exist = true;
+                       break;
+                   }
+               }
+               if (!is_exist) {
+                   delete_indices.insert(i);
+               }
             }
+            
 
             for (auto it = delete_indices.rbegin(); it != delete_indices.rend(); ++it)
             {
-                surrounding_existing_key_poses_id_.erase(surrounding_existing_key_poses_id_.begin() + i);
-                surrounding_corner_key_frames_.erase(surrounding_corner_key_frames_.begin() + i);
-                surrounding_surf_key_frames_.erase(surrounding_surf_key_frames_.begin() + i);
-                surrounding_outlier_key_frames_.erase(surrounding_outlier_key_frames_.begin() + i);
+                surrounding_existing_key_poses_id_.erase(surrounding_existing_key_poses_id_.begin() + *it);
+                surrounding_corner_key_frames_.erase(surrounding_corner_key_frames_.begin() + *it);
+                surrounding_surf_key_frames_.erase(surrounding_surf_key_frames_.begin() + *it);
+                surrounding_outlier_key_frames_.erase(surrounding_outlier_key_frames_.begin() + *it);
             }
             delete_indices.clear();
 
     	    // add new key frames that are not in calculated existing key frames
             for (const auto &p : surrounding_key_poses_->points) {
-                int idx = (int)p.inensity;
-                if (surrounding_existing_key_poses_id_.find(idx) == surrounding_existing_key_poses_id_.end()) {
+                int idx = (int)p.intensity;
+                if (std::count(surrounding_existing_key_poses_id_.begin(), surrounding_existing_key_poses_id_.end(), idx) == 0) {
                     update_transform_sin_cos(key_poses_6d_->points[idx]);
                     surrounding_existing_key_poses_id_.push_back(idx);
                     surrounding_corner_key_frames_.push_back(transformPointCloud(corner_key_frames_[idx]));
@@ -952,10 +948,10 @@ public:
         vg_outlier_filter_.setInputCloud(cloud_last_outlier_);
         vg_outlier_filter_.filter(*cloud_last_outlier_);
 
-        *last_total_surf_ += *cloud_last_surf_;
-        *last_total_surf_ += *cloud_last_outlier_;
-        vg_surf_filter_.setInputCloud(last_total_surf_);
-        vg_surf_filter_.filter(*last_total_surf_);
+        *cloud_laster_surf_outlier_ += *cloud_last_surf_;
+        *cloud_laster_surf_outlier_ += *cloud_last_outlier_;
+        vg_surf_filter_.setInputCloud(cloud_laster_surf_outlier_);
+        vg_surf_filter_.filter(*cloud_laster_surf_outlier_);
     }
 
     void corner_optimization() {
@@ -1028,7 +1024,7 @@ public:
                     float s = 1 - 0.9 * fabs(ld2);
 
                     if (s > 0.1) {
-                        cloud_ori_indices_.push_back(i);
+                        cloud_ori_->push_back(p);
 
                         Point coeff;
                         coeff.x = s * la;
@@ -1044,8 +1040,8 @@ public:
 
     void surf_optimization() {
         updatePointAssociateToMapSinCos();
-        for (int i = 0; i < last_total_surf_->size(); i++) {
-            const auto &p = last_total_surf_->points[i];
+        for (int i = 0; i < cloud_laster_surf_outlier_->size(); i++) {
+            const auto &p = cloud_laster_surf_outlier_->points[i];
             auto p_map = pointAssociateToMap(p); 
             std::vector<int> closest_indices;
             std::vector<float> closest_square_distances;
@@ -1084,7 +1080,7 @@ public:
                             + p_map.y * p_map.y + p_map.z * p_map.z));
 
                     if (s > 0.1) {
-                        cloud_ori_indices_.push_back(i);
+                        cloud_ori_->push_back(p);
 
                         Point coeff;
                         coeff.x = s * pa;
@@ -1106,7 +1102,7 @@ public:
         float srz = std::sin(transformTobeMapped[2]);
         float crz = std::cos(transformTobeMapped[2]);
 
-        int laserCloudSelNum = cloud_ori_indices_.points.size();
+        int laserCloudSelNum = cloud_ori_->size();
         if (laserCloudSelNum < 50) {
             return false;
         }
@@ -1118,7 +1114,7 @@ public:
         cv::Mat matAtB(6, 1, CV_32F, cv::Scalar::all(0));
         cv::Mat matX(6, 1, CV_32F, cv::Scalar::all(0));
         for (int i = 0; i < laserCloudSelNum; i++) {
-            const auto &p = cloud_ori_indices_[i];
+            const auto &p = cloud_ori_->points[i];
             const auto &coeff = coeff_sel_->points[i];
 
             float arx = (crx*sry*srz*p.x + crx*crz*sry*p.y - srx*sry*p.z) * coeff.x
@@ -1131,7 +1127,7 @@ public:
                       + (cry*srz - crz*srx*sry)*p.y - crx*sry*p.z) * coeff.z;
 
             float arz = ((crz*srx*sry - cry*srz)*p.x + (-cry*crz-srx*sry*srz)*p.y)*coeff.x
-                      + (crx*crz*.x - crx*srz*p.y) * coeff.y
+                      + (crx*crz*p.x - crx*srz*p.y) * coeff.y
                       + ((sry*srz + cry*crz*srx)*p.x + (crz*sry-cry*srx*srz)*p.y)*coeff.z;
 
             matA.at<float>(i, 0) = arx;
@@ -1204,7 +1200,7 @@ public:
             kdtree_surf_map_->setInputCloud(surf_map_ds_);
 
             for (int i = 0; i < 10; i++) {
-                cloud_ori_indices_.clear();
+                cloud_ori_->clear();
                 coeff_sel_->clear();
 
                 corner_optimization();
@@ -1232,17 +1228,17 @@ public:
          * update gtsam graph
          */
         if (key_poses_3d_->points.empty()) {
-            gtsam::Pose3 gpose(Rot3::RzRyRx(transformTobeMapped[2], transformTobeMapped[0], transformTobeMapped[1]),
+            gtsam::Pose3 gpose(gtsam::Rot3::RzRyRx(transformTobeMapped[2], transformTobeMapped[0], transformTobeMapped[1]),
                                 gtsam::Point3(transformTobeMapped[5], transformTobeMapped[3], transformTobeMapped[4]));
-            gtsam_graph_.add(gtsam::PriorFactor<Pose3>(0, gpose), prior_noise_);
+            gtsam_graph_.add(gtsam::PriorFactor<gtsam::Pose3>(0, gpose, prior_noise_));
             initial_estimate_.insert(0, gpose);
             transform_last_ = transformTobeMapped;
         } else{
-            gtsam::Pose3 poseFrom(Rot3::RzRyRx(transform_last_[2], transform_last_[0], transform_last_[1]),
+            gtsam::Pose3 poseFrom(gtsam::Rot3::RzRyRx(transform_last_[2], transform_last_[0], transform_last_[1]),
                                 gtsam::Point3(transform_last_[5], transform_last_[3], transform_last_[4]));
-            gtsam::Pose3 poseTo(Rot3::RzRyRx(transformAftMapped[2], transformAftMapped[0], transformAftMapped[1]),
+            gtsam::Pose3 poseTo(gtsam::Rot3::RzRyRx(transformAftMapped[2], transformAftMapped[0], transformAftMapped[1]),
                                 gtsam::Point3(transformAftMapped[5], transformAftMapped[3], transformAftMapped[4]));
-            gtsam_graph_.add(gtsam::BetweenFactor<Pose3>(key_poses_3d_->points.size()-1, key_poses_3d_->points.size(), poseFrom.between(poseTo), odometry_noise_));
+            gtsam_graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(key_poses_3d_->points.size()-1, key_poses_3d_->points.size(), poseFrom.between(poseTo), odometry_noise_));
             initial_estimate_.insert(key_poses_3d_->points.size(), poseTo);
         }
         /**
@@ -1305,7 +1301,7 @@ public:
 
             // update key poses
             for (int i = 0; i < current_estimate_.size(); ++i) {
-                auto v = current_estimate_.at<Pose3>(i);
+                auto v = current_estimate_.at<gtsam::Pose3>(i);
 
                 key_poses_3d_->points[i].x = v.translation().y();
                 key_poses_3d_->points[i].y = v.translation().z();

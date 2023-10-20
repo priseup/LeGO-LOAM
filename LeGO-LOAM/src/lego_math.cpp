@@ -108,5 +108,5 @@ float shift_acc(const float &acc, const float &time) {
 }
 
 float interpolation_by_linear(const float &start, const float &end, const float &ratio_from_start) {
-    return end * ratio_from_start + start * (1 - ratio_from_sart);
+    return end * ratio_from_start + start * (1 - ratio_from_start);
 }

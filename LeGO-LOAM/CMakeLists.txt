@@ -52,16 +52,20 @@ link_directories(
 	${Boost_LIBRARY_DIRS}
 )
 
+add_library(lego_math src/lego_math.cpp)
+target_link_libraries(lego_math ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+
 add_executable(imageProjection src/imageProjection.cpp)
 add_dependencies(imageProjection ${catkin_EXPORTED_TARGETS} cloud_msgs_gencpp)
-target_link_libraries(imageProjection ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+target_link_libraries(imageProjection lego_math ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
 
 add_executable(featureAssociation src/featureAssociation.cpp)
 add_dependencies(featureAssociation ${catkin_EXPORTED_TARGETS} cloud_msgs_gencpp)
-target_link_libraries(featureAssociation ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+target_link_libraries(featureAssociation lego_math ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
 
 add_executable(mapOptmization src/mapOptmization.cpp)
-target_link_libraries(mapOptmization ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} ${Boost_LIBRARIES} gtsam)
+target_link_libraries(mapOptmization lego_math ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} ${Boost_LIBRARIES} gtsam)
 
 add_executable(transformFusion src/transformFusion.cpp)
-target_link_libraries(transformFusion ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+target_link_libraries(transformFusion lego_math ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+

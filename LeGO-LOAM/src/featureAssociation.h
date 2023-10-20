@@ -61,7 +61,7 @@ private:
     void init();
 
     Point transform_to_start(const Point &p);
-    void transform_to_end(Point &p)
+    void transform_to_end(Point &p);
 
     void plugin_imu_rotation(const float &bcx, const float &bcy, const float &bcz,
                             const float &blx, const float &bly, const float &blz, 
