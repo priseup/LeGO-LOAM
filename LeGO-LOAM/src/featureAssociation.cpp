@@ -3,6 +3,8 @@
 #include "lego_math.h"
 #include "featureAssociation.h"
 
+// static int feature_idx_ = 0;
+
 FeatureAssociation::FeatureAssociation(): nh_("~") {
     sub_laser_cloud_ = nh_.subscribe<sensor_msgs::PointCloud2>("/ground_with_segmented_cloud", 1, &FeatureAssociation::laser_cloud_handler, this);
     sub_laser_cloud_info_ = nh_.subscribe<cloud_msgs::cloud_info>("/ground_with_segmented_cloud_info", 1, &FeatureAssociation::laser_cloud_msg_handler, this);
@@ -43,6 +45,14 @@ FeatureAssociation::FeatureAssociation(): nh_("~") {
 
     init();
 }
+void FeatureAssociation::reset_parameters() {
+    corner_sharp_cloud_->clear();
+    corner_less_sharp_cloud_->clear();
+    surf_flat_cloud_->clear();
+    surf_less_flat_cloud_->clear();
+
+    std::fill(is_neibor_picked_.begin(), is_neibor_picked_.end(), 0);
+}
 
 void FeatureAssociation::init()
 {
@@ -51,7 +61,7 @@ void FeatureAssociation::init()
     cloud_smoothness_.resize(points_num);
     cloud_curvature_.resize(points_num);
     is_neibor_picked_.resize(points_num);
-    cloud_label_.resize(points_num, FeatureAssociation::FeatureLabel::surf_less_flat);
+    cloud_label_.resize(points_num, FeatureLabel::surf_less_flat);
 
     pointSearchCornerInd1.resize(points_num);
     pointSearchCornerInd2.resize(points_num);
@@ -329,12 +339,12 @@ void FeatureAssociation::adjust_distortion() {
             }
         }
     }
-    imu_cache_.last_new_idx = imu_cache_.newest_idx;
+    imu_cache_.last_new_idx = imu_cache_.after_laser_idx + 1;
 }
 
 void FeatureAssociation::calculate_smoothness()
 {
-    for (int i = 5; i < projected_ground_segment_cloud_->points.size() - 5; i++) {
+    for (int i = 5; i < (int)projected_ground_segment_cloud_->points.size() - 5; i++) {
         const auto &cloud_range = segmented_cloud_msg_.ground_segment_cloud_range; 
         float diff_range = cloud_range[i-5] + cloud_range[i-4]
                         + cloud_range[i-3] + cloud_range[i-2]
@@ -345,8 +355,7 @@ void FeatureAssociation::calculate_smoothness()
 
         cloud_curvature_[i] = diff_range * diff_range;
 
-        cloud_smoothness_[i].value = cloud_curvature_[i];
-        cloud_smoothness_[i].idx = i;
+        cloud_smoothness_[i] = {cloud_curvature_[i], i};
     }
 }
 
@@ -377,6 +386,7 @@ void FeatureAssociation::mark_occluded_points()
 
 void FeatureAssociation::mark_neibor_is_picked(int idx)
 {
+    int points_num = N_SCAN * Horizon_SCAN;
     const auto &cloud_column = segmented_cloud_msg_.ground_segment_cloud_column;
     for (int i = 1; i <= 5; i++) {
         if (std::abs(int(cloud_column[idx + i] - cloud_column[idx + i - 1])) > 10)
@@ -392,35 +402,35 @@ void FeatureAssociation::mark_neibor_is_picked(int idx)
 
 void FeatureAssociation::extract_features()
 {
-    corner_sharp_cloud_->clear();
-    corner_less_sharp_cloud_->clear();
-    surf_flat_cloud_->clear();
-    surf_less_flat_cloud_->clear();
-
+    // static auto feature_log = spdlog::basic_logger_st("feature", "/home/my_lego/feature_log.txt", true);
     const auto &cloud = projected_ground_segment_cloud_->points;
     const auto &cloud_range = segmented_cloud_msg_.ground_segment_cloud_range;
     const auto &cloud_column = segmented_cloud_msg_.ground_segment_cloud_column;
 
     for (int i = 0; i < N_SCAN; i++) {
+      int scan_start = segmented_cloud_msg_.ring_index_start[i];
+      int scan_end = segmented_cloud_msg_.ring_index_end[i];
         for (int j = 0; j < 6; j++) {
-            int sp = (segmented_cloud_msg_.ring_index_start[i] * (6 - j)  + segmented_cloud_msg_.ring_index_end[i] * j) / 6;
-            int ep = (segmented_cloud_msg_.ring_index_start[i] * (5 - j)  + segmented_cloud_msg_.ring_index_end[i] * (j + 1)) / 6 - 1;
+            int sp = std::max((scan_start * (6 - j)  + scan_end * j) / 6, 5);
+            int ep = (scan_start * (5 - j) + scan_end * (j + 1)) / 6 - 1;
             if (sp >= ep)
                 continue;
             std::sort(cloud_smoothness_.begin() + sp, cloud_smoothness_.begin() + ep + 1);
 
-            for (int k = ep; ep >= sp; k--) {
+            int pick_num = 0;
+            for (int k = ep; k >= sp; k--) {
                 int idx = cloud_smoothness_[k].idx;
-
+        
                 if (is_neibor_picked_[idx] == 0
                     && !segmented_cloud_msg_.ground_segment_flag[idx]
-                    && cloud_curvature_[idx] > edgeThreshold ) {
-                    if (corner_sharp_cloud_->size() <= 2) {
-                        cloud_label_[idx] = FeatureAssociation::FeatureLabel::corner_sharp;
+                    && cloud_curvature_[idx] > edgeThreshold) {
+                    pick_num++;
+                    if (pick_num <= 2) {
+                        cloud_label_[idx] = FeatureLabel::corner_sharp;
                         corner_sharp_cloud_->push_back(cloud[idx]);
                         corner_less_sharp_cloud_->push_back(cloud[idx]);
-                    } else if (corner_less_sharp_cloud_->size() <= 20) {
-                        cloud_label_[idx] = FeatureAssociation::FeatureLabel::corner_less_sharp;
+                    } else if (pick_num <= 20) {
+                        cloud_label_[idx] = FeatureLabel::corner_less_sharp;
                         corner_less_sharp_cloud_->push_back(cloud[idx]);
                     } else {
                         break;
@@ -431,16 +441,17 @@ void FeatureAssociation::extract_features()
                 }
             }
 
+            pick_num = 0;
             for (int k = sp; k <= ep; k++) {
                 int idx = cloud_smoothness_[k].idx;
 
                 if (is_neibor_picked_[idx] == 0
                     && segmented_cloud_msg_.ground_segment_flag[idx]
                     && cloud_curvature_[idx] < surfThreshold) {
-                    cloud_label_[idx] = FeatureAssociation::FeatureLabel::surf_flat;
-                    surf_flat_cloud_->push_back(projected_ground_segment_cloud_->points[idx]);
-                    surf_less_flat_cloud_->push_back(projected_ground_segment_cloud_->points[idx]);
-                    if (surf_flat_cloud_->size() >= 4) {
+                    cloud_label_[idx] = FeatureLabel::surf_flat;
+                    surf_flat_cloud_->push_back(cloud[idx]);
+                    surf_less_flat_cloud_->push_back(cloud[idx]);
+                    if (pick_num++ >= 4) {
                         break;
                     }
 
@@ -450,14 +461,35 @@ void FeatureAssociation::extract_features()
             }
 
             for (int k = sp; k <= ep; k++) {
-                if (cloud_label_[k] == FeatureAssociation::FeatureLabel::surf_less_flat) {
-                    surf_less_flat_cloud_->push_back(projected_ground_segment_cloud_->points[k]);
+                if (cloud_label_[k] == FeatureLabel::surf_less_flat) {
+                    surf_less_flat_cloud_->push_back(cloud[k]);
                 }
             }
         }
     }
+    static pcl::PointCloud<Point>::Ptr tmp_cloud(new pcl::PointCloud<Point>);
     voxel_grid_filter_.setInputCloud(surf_less_flat_cloud_);
-    voxel_grid_filter_.filter(*surf_less_flat_cloud_);
+    voxel_grid_filter_.filter(*tmp_cloud);
+    *surf_less_flat_cloud_ = *tmp_cloud;
+    tmp_cloud->clear();
+
+    // feature_log->info("sharp, less_sharp, surf, less_surf: {}, {}, {}, {}", corner_sharp_cloud_->size(), corner_less_sharp_cloud_->size(), surf_flat_cloud_->size(), surf_less_flat_cloud_->size());
+    // feature_log->flush(spdlog::level::info);
+
+/*
+    pcl::PointCloud<Point> tmp_save_cloud;
+    for (auto &p : corner_sharp_cloud_->points) {
+      Point ap;
+      ap.x = p.z;
+      ap.y = p.x;
+      ap.z = p.y;
+      ap.intensity = p.intensity;
+      tmp_save_cloud.push_back(ap);
+    }
+    pcl::io::savePCDFileASCII(fmt::format("/home/my_lego/{}_corner_sharp.pcd", feature_idx_), tmp_save_cloud);
+
+    tmp_save_cloud.clear();
+*/
 }
 
 void FeatureAssociation::publish_cloud()
@@ -644,7 +676,7 @@ std::array<int, 2> FeatureAssociation::find_closest_in_same_adjacent_ring(int cl
         }
 
         float d = square_distance(cloud->points[i], p);
-        if (get_same && point_scan_id(cloud->points[i]) <= closest_scan_id) { // why not == closest_scan_id
+        if (get_same && point_scan_id(cloud->points[i]) <= closest_scan_id) {
             if (d < min_dis_same) {
                 min_dis_same = d;
                 min_idx_same = i;
@@ -684,7 +716,7 @@ std::array<int, 2> FeatureAssociation::find_closest_in_same_adjacent_ring(int cl
         //     continue;
 
     //     float d = square_distance(cloud->points[i], p);
-    //     if (point_scan_id(cloud->points[i]) == closest_scan_id) { // why not == closest_scan_id
+    //     if (point_scan_id(cloud->points[i]) == closest_scan_id) {
     //         if (d < min_dis_same) {
     //             min_dis_same = d;
     //             min_idx_same = i;
@@ -1041,6 +1073,8 @@ void FeatureAssociation::check_system_initialization() {
     transform_from_first_laser_frame_[0] += imu_cache_.pitch_start;
     transform_from_first_laser_frame_[2] += imu_cache_.roll_start;
 
+    reset_parameters();
+
     is_system_inited_ = true;
 }
 
@@ -1221,6 +1255,8 @@ void FeatureAssociation::run()
     publish_odometry();
 
     publish_cloud_last(); // cloud to mapOptimization
+
+    reset_parameters();
 }
 
 int main(int argc, char** argv)

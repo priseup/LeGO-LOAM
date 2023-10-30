@@ -73,15 +73,31 @@ private:
     int point_column(const Point &p) const;
 
 private:
-enum class PointLabel {
-    valid,
-    invalid,
-    outlier,
-    ground,
-    segmentation
-};
+    struct QueueElement
+    {
+        int row;
+        int col;
+    };
+
+    struct Queue
+    {
+        // int cluster_size = 0;
+        int start = 0;
+        int end = 0;
+
+        struct QueueElement elements[N_SCAN*Horizon_SCAN];
+    };
+    enum class PointLabel {
+        valid,
+        invalid,
+        outlier,
+        ground,
+        segmentation
+    };
 
 private:
+
+    int file_idx_ = 0;
     ros::NodeHandle nh_;
 
     ros::Subscriber sub_laser_cloud_;
@@ -107,13 +123,13 @@ private:
     pcl::PointCloud<Point>::Ptr projected_outlier_cloud_;
 
     std::vector<PointLabel> point_label_;
-    std::unordered_map<int, int> segmentation_cluster_id_; // can be replaced by std::vector<int> if unordered_map has low performance
+    std::vector<int> point_cluster_id_;
+
+    int segment_id_ = 1;
 
     Point init_point_value_; // fill in projected_laser_cloud_ at each iteration
 
     cv::Mat projected_cloud_range_; // range matrix for range image
-    cv::Mat projected_cloud_label_; // label matrix for segmentaiton marking
-    cv::Mat projected_cloud_ground_flag_; // ground matrix for ground cloud marking
 
     cloud_msgs::cloud_info segmented_cloud_msg_; // info of segmented cloud
     std_msgs::Header cloud_header_;

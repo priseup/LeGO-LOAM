@@ -18,7 +18,7 @@ double distance(const Point &p0, const Point &p1) {
 }
 
 float laser_range(const Point &p) {
-    return std::sqrt(p.x * p.x + p.y * p.y + p.z + p.z);
+    return std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
 }
 
 float laser_range(const float &x, const float &y, const float &z) {

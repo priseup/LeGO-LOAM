@@ -39,15 +39,28 @@ void ImageProjection::allocate_memory() {
     laser_cloud_input_.reset(new pcl::PointCloud<Point>);
 
     projected_laser_cloud_.reset(new pcl::PointCloud<Point>);
-    std::fill_n(std::back_inserter(projected_laser_cloud_->points), points_num, init_point_value_);
+    projected_laser_cloud_->resize(points_num);
 
     projected_cloud_with_range_.reset(new pcl::PointCloud<Point>);
-    std::fill_n(std::back_inserter(projected_cloud_with_range_->points), points_num, init_point_value_);
+    projected_cloud_with_range_->resize(points_num);
 
     projected_pure_ground_cloud_.reset(new pcl::PointCloud<Point>);
     projected_ground_segment_cloud_.reset(new pcl::PointCloud<Point>);
     projected_pure_segmented_cloud_.reset(new pcl::PointCloud<Point>);
     projected_outlier_cloud_.reset(new pcl::PointCloud<Point>);
+
+}
+
+void ImageProjection::reset_parameters() {
+    const int points_num = N_SCAN*Horizon_SCAN;
+
+    laser_cloud_input_->clear();
+    projected_pure_ground_cloud_->clear();
+    projected_pure_segmented_cloud_->clear();
+    projected_ground_segment_cloud_->clear();
+    projected_outlier_cloud_->clear();
+
+    projected_cloud_range_ = cv::Mat(N_SCAN, Horizon_SCAN, CV_32F, cv::Scalar::all(FLT_MAX));
 
     segmented_cloud_msg_.ring_index_start.assign(N_SCAN, 0);
     segmented_cloud_msg_.ring_index_end.assign(N_SCAN, 0);
@@ -56,19 +69,13 @@ void ImageProjection::allocate_memory() {
     segmented_cloud_msg_.ground_segment_cloud_column.assign(points_num, 0);
     segmented_cloud_msg_.ground_segment_cloud_range.assign(points_num, 0);
 
-    point_label_.assign(points_num, ImageProjection::PointLabel::invalid);
-}
+    point_label_.assign(points_num, PointLabel::invalid);
+    point_cluster_id_.resize(points_num, -1);
 
-void ImageProjection::reset_parameters() {
-    laser_cloud_input_->clear();
-    projected_pure_ground_cloud_->clear();
-    projected_pure_segmented_cloud_->clear();
-    projected_ground_segment_cloud_->clear();
-    projected_outlier_cloud_->clear();
+    std::fill(projected_laser_cloud_->points.begin(), projected_laser_cloud_->points.end(), init_point_value_);
+    std::fill(projected_cloud_with_range_->points.begin(), projected_cloud_with_range_->points.end(), init_point_value_);
 
-    projected_cloud_range_ = cv::Mat(N_SCAN, Horizon_SCAN, CV_32F, cv::Scalar::all(FLT_MAX));
-    projected_cloud_ground_flag_ = cv::Mat(N_SCAN, Horizon_SCAN, CV_8S, cv::Scalar::all(0));
-    projected_cloud_label_ = cv::Mat(N_SCAN, Horizon_SCAN, CV_32S, cv::Scalar::all(0));
+    segment_id_ = 1;
 }
 
 void ImageProjection::copy_point_cloud(const sensor_msgs::PointCloud2ConstPtr &laser_cloud) {
@@ -81,6 +88,7 @@ void ImageProjection::copy_point_cloud(const sensor_msgs::PointCloud2ConstPtr &l
     //      If the data is dense, we don't need to check for NaN
     //      Simply copy the data
     // so, if isDense == true, do nothing???
+    // laser_cloud_input_->is_dense = false;
     std::vector<int> indices;
     pcl::removeNaNFromPointCloud(*laser_cloud_input_, *laser_cloud_input_, indices);
 
@@ -152,7 +160,7 @@ int ImageProjection::point_column(const Point &p) const {
 
 // mark point_label_ from invalid to valid
 void ImageProjection::project_point_cloud() {
-    for (size_t i = 0; i < laser_cloud_input_->points.size(); ++i) {
+    for (size_t i = 0; i < laser_cloud_input_->size(); ++i) {
         const auto &point = laser_cloud_input_->points[i];
 
         int row = point_row(point, i);
@@ -168,14 +176,13 @@ void ImageProjection::project_point_cloud() {
         }
 
         float range = laser_range(point);
-        if (range < sensorMinimumRange)
-        {
+        if (range < sensorMinimumRange) {
             continue;
         }
         projected_cloud_range_.at<float>(row, column) = range;
 
         int index = index_in_project_cloud(row, column);
-        point_label_[index] = ImageProjection::PointLabel::valid;
+        point_label_[index] = PointLabel::valid;
 
         projected_laser_cloud_->points[index] = point;
         // intensity will add point_time as a new value in featureAssociation::adjust_distortion()
@@ -185,17 +192,20 @@ void ImageProjection::project_point_cloud() {
         projected_cloud_with_range_->points[index] = point;
         projected_cloud_with_range_->points[index].intensity = range;
     }
+    // pcl::io::savePCDFileASCII(fmt::format("/home/pqf/my_lego/{}_project.pcd", file_idx_), *projected_laser_cloud_);
 }
 
 // mark point_label_ from valid to ground
 void ImageProjection::extract_ground() {
-    for (int j = 0; j < Horizon_SCAN; ++j) {
-        for (int i = 0; i < groundScanInd; ++i) {
+  // static int size = 0;
+  // std::set<int> ground_idx;
+    for (int i = 0; i < groundScanInd; ++i) {
+        for (int j = 0; j < Horizon_SCAN; ++j) {
             int current_idx = index_in_project_cloud(i, j);
             int upper_idx = index_in_project_cloud(i+1, j);
 
-            if (point_label_[current_idx] == ImageProjection::PointLabel::invalid
-                || point_label_[upper_idx] == ImageProjection::PointLabel::invalid) {
+            if (point_label_[current_idx] == PointLabel::invalid
+                || point_label_[upper_idx] == PointLabel::invalid) {
                     continue;
                 }
                 
@@ -206,21 +216,21 @@ void ImageProjection::extract_ground() {
             float angle = rad2deg(std::atan2(diff_z, sqrt(diff_x*diff_x + diff_y*diff_y)));
 
             if (abs(angle - sensorMountAngle) <= 10) {
-                point_label_[current_idx] = ImageProjection::PointLabel::ground;
-                point_label_[upper_idx] = ImageProjection::PointLabel::ground;
+                point_label_[current_idx] = PointLabel::ground;
+                point_label_[upper_idx] = PointLabel::ground;
             }
         }
     }
-
     if (pub_pure_ground_cloud_.getNumSubscribers() > 0) {
         for (int i = 0; i <= groundScanInd; ++i) {
             for (int j = 0; j < Horizon_SCAN; ++j) {
                 int idx = index_in_project_cloud(i, j);
-                if (point_label_[idx] == ImageProjection::PointLabel::ground)
+                if (point_label_[idx] == PointLabel::ground)
                     projected_pure_ground_cloud_->push_back(projected_laser_cloud_->points[idx]);
             }
         }
     }
+    // pcl::io::savePCDFileASCII(fmt::format("/home/pqf/my_lego/{}_ground.pcd", file_idx_), *projected_pure_ground_cloud_);
 }
 
 // mark point_label_ from valid to segmentation and outlier
@@ -228,37 +238,61 @@ void ImageProjection::extract_segmentation() {
     for (int i = 0; i < N_SCAN; ++i) {
         for (int j = 0; j < Horizon_SCAN; ++j) {
             int idx = index_in_project_cloud(i, j);
-            if (point_label_[idx] == ImageProjection::PointLabel::valid)
+            if (point_label_[idx] == PointLabel::valid)
+            {
                 bfs_cluster(i, j);
+            }
         }
     }
+    /*
+    pcl::PointCloud<Point>::Ptr tmp_outlier(new pcl::PointCloud<Point>);
+    pcl::PointCloud<Point>::Ptr tmp_seg(new pcl::PointCloud<Point>);
+    for (int i = 0; i < N_SCAN; ++i) {
+        for (int j = 0; j < Horizon_SCAN; ++j) {
+            int idx = index_in_project_cloud(i, j);
+            if (i > groundScanInd && point_label_[idx] == PointLabel::outlier) {
+              tmp_outlier->push_back(projected_laser_cloud_->points[idx]);
+              tmp_outlier->back().intensity = 999;
+            } else if (point_label_[idx] == PointLabel::segmentation) {
+              tmp_seg->push_back(projected_laser_cloud_->points[idx]);
+              tmp_seg->back().intensity = point_cluster_id_[idx];
+            }
+        }
+    }
+    if (tmp_outlier->size())
+      pcl::io::savePCDFileASCII(fmt::format("/home/pqf/my_lego/{}_outlier.pcd", file_idx_), *tmp_outlier);
+    if (tmp_seg->size())
+      pcl::io::savePCDFileASCII(fmt::format("/home/pqf/my_lego/{}_seg.pcd", file_idx_), *tmp_seg);
+
+    file_idx_++;
+    */
 
     for (int i = 0; i < N_SCAN; ++i) {
         segmented_cloud_msg_.ring_index_start[i] = projected_ground_segment_cloud_->size() - 1 + 5;
         for (int j = 0; j < Horizon_SCAN; ++j) {
             int idx = index_in_project_cloud(i, j);
 
-            if (point_label_[idx] == ImageProjection::PointLabel::invalid) {
+            if (point_label_[idx] == PointLabel::invalid) {
                 continue;
-            } else if (point_label_[idx] == ImageProjection::PointLabel::outlier) {
+            } else if (point_label_[idx] == PointLabel::outlier) {
                 if (i > groundScanInd && j % 5 == 0) {
                     projected_outlier_cloud_->push_back(projected_laser_cloud_->points[idx]);
                 }
             } else {
-                if (point_label_[idx] == ImageProjection::PointLabel::ground) {
+                if (point_label_[idx] == PointLabel::ground) {
                     if ((j > 5) && (j % 5 != 0) && (j < Horizon_SCAN-5))
                         continue;
                 } else {    // PointLabel::segmentation
                     // pure segmented cloud for visualization
                     if (pub_pure_segmented_cloud_.getNumSubscribers() > 0) {
                         projected_pure_segmented_cloud_->push_back(projected_laser_cloud_->points[idx]);
-                        projected_pure_segmented_cloud_->points.back().intensity = segmentation_cluster_id_[idx];
+                        projected_pure_segmented_cloud_->back().intensity = point_cluster_id_[idx];
                     }
                 }
 
                 int point_idx = projected_ground_segment_cloud_->size();
                 // mark ground points so they will not be considered as edge features later
-                segmented_cloud_msg_.ground_segment_flag[point_idx] = point_label_[idx] == ImageProjection::PointLabel::ground;
+                segmented_cloud_msg_.ground_segment_flag[point_idx] = point_label_[idx] == PointLabel::ground;
                 // mark the points' column index for marking occlusion later
                 segmented_cloud_msg_.ground_segment_cloud_column[point_idx] = j;
                 // save range info
@@ -273,38 +307,22 @@ void ImageProjection::extract_segmentation() {
 
 // use std::queue std::vector std::deque will slow the program down greatly
 void ImageProjection::bfs_cluster(int row, int col) {
-    struct QueueElement
-    {
-        int row;
-        int col;
-    };
-
-    struct Queue
-    {
-        int cluster_size = 0;
-        int start = 0;
-        int end = 0;
-
-        struct QueueElement elements[N_SCAN*Horizon_SCAN];
-    };
-
-    static int segment_id = 1;
-    static bool cross_scan_flag[N_SCAN] = {false};
     static struct Queue queue;
     queue.elements[0].row = row;
     queue.elements[0].col = col;
     queue.start = 0;
     queue.end = 1;
-    queue.cluster_size = queue.end;
 
+    static std::array<bool, N_SCAN> cross_scan_flag;
+    cross_scan_flag.fill(false);
     while (queue.end - queue.start > 0) {
         int current_row = queue.elements[queue.start].row;
         int current_col = queue.elements[queue.start].col;
         ++queue.start;   // pop front
 
         int idx = index_in_project_cloud(current_row, current_col);
-        point_label_[idx] = ImageProjection::PointLabel::segmentation;
-        segmentation_cluster_id_[idx] = segment_id;
+        point_label_[idx] = PointLabel::segmentation;
+        point_cluster_id_[idx] = segment_id_;
 
         for (auto &n : neighbors_) {
             int neibor_row = current_row + n.first;
@@ -318,10 +336,11 @@ void ImageProjection::bfs_cluster(int row, int col) {
                 neibor_col = Horizon_SCAN - 1;
             if (neibor_col >= Horizon_SCAN)
                 neibor_col = 0;
-
-            // prevent infinite loop (caused by put already examined point back)
-            if (segmentation_cluster_id_.find(idx) != segmentation_cluster_id_.end())
-                continue;
+              // prevent infinite loop (caused by put already examined point back)
+              if (point_label_[index_in_project_cloud(neibor_row, neibor_col)] != PointLabel::valid)
+              { 
+                  continue;
+              }
 
             auto &&distance = std::minmax(projected_cloud_range_.at<float>(current_row, current_col), 
                             projected_cloud_range_.at<float>(neibor_row, neibor_col));
@@ -337,8 +356,10 @@ void ImageProjection::bfs_cluster(int row, int col) {
                 queue.elements[queue.end].row = neibor_row;
                 queue.elements[queue.end].col = neibor_col;
 
-                queue.cluster_size = queue.end;
-                ++queue.end;
+                point_label_[index_in_project_cloud(neibor_row, neibor_col)] = PointLabel::segmentation;
+                point_cluster_id_[index_in_project_cloud(neibor_row, neibor_col)] = segment_id_;
+
+                queue.end++;
 
                 cross_scan_flag[neibor_row] = true;
             }
@@ -346,23 +367,22 @@ void ImageProjection::bfs_cluster(int row, int col) {
     }
 
     // check if this segment is valid
-    if (queue.cluster_size >= 30) {
-        ++segment_id;
+    if (queue.end >= 30) {
+        ++segment_id_;
     }
-    else if (queue.cluster_size >= segmentValidPointNum) {
-        if (std::count(cross_scan_flag, cross_scan_flag + N_SCAN, true) >= segmentValidLineNum) {
-            ++segment_id;
+    else if (queue.end >= segmentValidPointNum) {
+        if (std::count(cross_scan_flag.begin(), cross_scan_flag.end(), true) >= segmentValidLineNum) {
+            ++segment_id_;
         }
     }
     else { // segment is invalid, mark these points as outlier
-        for (int i = queue.cluster_size; i >= 0; --i) {
+        for (int i = queue.end; i >= 0; --i) {
             int idx = index_in_project_cloud(queue.elements[i].row, queue.elements[i].col);
-            point_label_[idx] = ImageProjection::PointLabel::outlier;
-            segmentation_cluster_id_.erase(idx);
+            point_label_[idx] = PointLabel::outlier;
+            point_cluster_id_[idx] = -1;
         }
     }
-    std::fill(cross_scan_flag, cross_scan_flag + N_SCAN, false);
-    // segmentation_cluster_id_ as unordered_map, may get low performance
+    cross_scan_flag.fill(false);
 }
 
 void ImageProjection::publish_cloud() {

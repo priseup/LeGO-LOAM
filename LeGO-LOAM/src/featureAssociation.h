@@ -121,6 +121,8 @@ private:
     
     void publish_cloud();
 
+    void reset_parameters();
+
     void mark_neibor_is_picked(int idx);
 
     std::array<int, 2> find_closest_in_same_adjacent_ring(int closest_idx, const Point &p, const pcl::PointCloud<Point>::Ptr &cloud, bool get_same);
@@ -234,7 +236,7 @@ private:
 
     struct smoothness_t{ 
         float value;
-        size_t idx;
+        int idx;
 
         bool operator < (const smoothness_t &other) const
         {
