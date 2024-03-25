@@ -34,8 +34,28 @@
 
 #pragma once
 
-#include "utility.h"
+#include <ros/ros.h>
+#include <sensor_msgs/Imu.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <nav_msgs/Odometry.h>
+
 #include <array>
+#include <vector>
+
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/filters/filter.h>
+#include <pcl/common/common.h>
+
+#include <tf/transform_broadcaster.h>
+#include <tf/transform_datatypes.h>
+
+#include <Eigen/Dense>
+
+#include <array>
+#include "cloud_msgs/cloud_info.h"
+#include "utility.h"
+#include "laser_info.h"
 
 class ImageProjection{
 public:
@@ -129,7 +149,7 @@ private:
 
     Point init_point_value_; // fill in projected_laser_cloud_ at each iteration
 
-    cv::Mat projected_cloud_range_; // range matrix for range image
+    Eigen::MatrixXf projected_cloud_range_; // range matrix for range image
 
     cloud_msgs::cloud_info segmented_cloud_msg_; // info of segmented cloud
     std_msgs::Header cloud_header_;

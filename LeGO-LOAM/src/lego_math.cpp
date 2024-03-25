@@ -25,6 +25,11 @@ float laser_range(const float &x, const float &y, const float &z) {
     return std::sqrt(x * x + y * y + z * z);
 }
 
+
+float interpolation_by_linear(const float &start, const float &end, const float &ratio_from_start) {
+    return end * ratio_from_start + start * (1 - ratio_from_start);
+}
+/*
 std::array<float, 3> rotate_by_x_axis(const float &x, const float &y, const float &z, const float &roll) {
     float rx = x;
     float ry = std::cos(roll) * y - std::sin(roll) * z;
@@ -98,15 +103,4 @@ std::array<float, 3> rotate_by_yxz(const float &x, const float &y, const float &
     auto r1 = rotate_by_x_axis(r0[0], r0[1], r0[2], cos_roll, sin_roll);
     return rotate_by_z_axis(r1[0], r1[1], r1[2], cos_yaw, sin_yaw);
 }
-
-float shift_vel(const float &vel, const float &time) {
-    return vel * time;
-}
-
-float shift_acc(const float &acc, const float &time) {
-    return acc * time * time / 2;
-}
-
-float interpolation_by_linear(const float &start, const float &end, const float &ratio_from_start) {
-    return end * ratio_from_start + start * (1 - ratio_from_start);
-}
+*/

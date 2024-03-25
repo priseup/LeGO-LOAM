@@ -35,21 +35,29 @@
 #ifndef LEGO_FEATURE_ASSOCATION_H_
 #define LEGO_FEATURE_ASSOCATION_H_
 
+#include <ros/ros.h>
+#include <sensor_msgs/Imu.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <nav_msgs/Odometry.h>
+
 #include <array>
 #include <vector>
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include <pcl_ros/point_cloud.h>
-#include <pcl_conversions/pcl_conversions.h>
 #include <pcl/range_image/range_image.h>
 #include <pcl/filters/filter.h>
-#include <pcl/filters/voxel_grid.h>
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/common/common.h>
-#include <pcl/registration/icp.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl_conversions/pcl_conversions.h>
 
 #include <tf/transform_broadcaster.h>
 #include <tf/transform_datatypes.h>
+
+#include <Eigen/Dense>
+
+#include "cloud_msgs/cloud_info.h"
 #include "utility.h"
 
 class FeatureAssociation{
@@ -63,45 +71,20 @@ private:
     Point transform_to_start(const Point &p);
     void transform_to_end(Point &p);
 
-    void plugin_imu_rotation(const float &bcx, const float &bcy, const float &bcz,
-                            const float &blx, const float &bly, const float &blz, 
-                            const float &alx, const float &aly, const float &alz,
-                            float &acx, float &acy, float &acz);
-
-    void accumulate_rotation(const float &cx, const float &cy, const float &cz,
-                            const float &lx, const float &ly, const float &lz, 
-                            float &ox, float &oy, float &oz);
-
-    void find_corresponding_corner_features(int iterCount);
-    void find_corresponding_surf_features(int iterCount);
-
-    bool calculate_suf_transformation(int iterCount);
-
-    bool calculate_corner_transformation(int iterCount);
-
     void check_system_initialization();
 
-    void update_initial_guess();
-
-    void update_transformation();
-
-    void integrate_transformation(); 
+    void calculate_transformation();
 
     void publish_odometry();
 
-    void adjust_outlier_cloud(); 
-
     void publish_cloud_last();
 
+/*
     void update_imu_rotation_start_sin_cos();
-
     void shift_to_start_imu(const float &point_time);
-
     void vel_to_start_imu();
-
     void transform_to_start_imu(Point &p);
-
-    void accumulate_imu_shift_rotation();
+*/
 
     void imu_handler(const sensor_msgs::Imu::ConstPtr& imuIn);
 
@@ -165,74 +148,10 @@ private:
         float angular_y = 0.f;
         float angular_z = 0.f;
     };
-    struct ImuCache
-    {
-        int after_laser_idx = 0; // first imu newer than laser point time
-        int newest_idx = -1;
-        int last_new_idx = 0;
-
-        float roll_start = 0.f;
-        float pitch_start = 0.f;
-        float yaw_start = 0.f;;
-
-        float roll_start_cos = 0.f;
-        float roll_start_sin = 0.f;
-        float pitch_start_cos = 0.f;
-        float pitch_start_sin = 0.f;
-        float yaw_start_cos = 0.f;
-        float yaw_start_sin = 0.f;
-
-        float vel_start_x = 0.f;
-        float vel_start_y = 0.f;
-        float vel_start_z = 0.f;
-
-        float shift_start_x = 0.f;
-        float shift_start_y = 0.f;
-        float shift_start_z = 0.f;
-
-        float roll_current = 0.f;
-        float pitch_current = 0.f;
-        float yaw_current = 0.f;
-
-        float vel_current_x = 0.f;
-        float vel_current_y = 0.f;
-        float vel_current_z = 0.f;
-
-        float shift_current_x = 0.f;
-        float shift_current_y = 0.f;
-        float shift_current_z = 0.f;
-
-        float drift_from_start_to_current_x = 0.f;
-        float drift_from_start_to_current_y = 0.f;
-        float drift_from_start_to_current_z = 0.f;
-
-        float vel_diff_from_start_to_current_x = 0.f;
-        float vel_diff_from_start_to_current_y = 0.f;
-        float vel_diff_from_start_to_current_z = 0.f;
-
-        float angular_current_x = 0.f;
-        float angular_current_y = 0.f;
-        float angular_current_z = 0.f;
-
-        float last_angular_start_x = 0.f;
-        float last_angular_start_y = 0.f;
-        float last_angular_start_z = 0.f;
-
-        float angular_diff_from_prev_to_current_x = 0.f;
-        float angular_diff_from_prev_to_current_y = 0.f;
-        float angular_diff_from_prev_to_current_z = 0.f;
-
-        struct ImuFrame imu_queue[imuQueLength];
-
-        int inc(int idx) const
-        {
-            return (idx + 1) % imuQueLength;
-        }
-        int dec(int idx) const
-        {
-            return (idx + imuQueLength - 1) % imuQueLength;
-        }
-    };
+    struct ImuFrame imus_[imuQueLength];
+    int imu_idx_after_laser_ = 0; // first imu newer than laser point time
+    int imu_idx_new_ = -1;  // newest imu in imus_
+    int imu_idx_last_used_ = 0; // idx of used imu in imus_
 
     struct smoothness_t{ 
         float value;
@@ -244,7 +163,7 @@ private:
         }
     };
 private:
-	ros::NodeHandle nh_;
+    ros::NodeHandle nh_;
 
     ros::Subscriber sub_laser_cloud_;
     ros::Subscriber sub_laser_cloud_info_;
@@ -272,15 +191,8 @@ private:
     pcl::PointCloud<Point>::Ptr cloud_last_corner_;
     pcl::PointCloud<Point>::Ptr cloud_last_surf_;
 
-    std::vector<int> cloud_ori_indices_;
-    pcl::PointCloud<Point>::Ptr coeff_sel_;
-
-    pcl::KdTreeFLANN<Point>::Ptr kdtree_last_corner_;
-    pcl::KdTreeFLANN<Point>::Ptr kdtree_last_surf_;
-
-    pcl::VoxelGrid<Point> voxel_grid_filter_;
-
-    struct ImuCache imu_cache_;
+    pcl::KdTreeFLANN<Point>::Ptr kd_last_corner_;
+    pcl::KdTreeFLANN<Point>::Ptr kd_last_surf_;
 
     double laser_scan_time_ = 0;
     double segment_cloud_time_ = 0;
@@ -301,23 +213,19 @@ private:
 
     bool is_system_inited_ = false;
 
-    std::vector<int> pointSearchCornerInd1;
-    std::vector<int> pointSearchCornerInd2;
+    double pose_params_[6] = {0, 0, 0, 0, 0, 0}; // tx, ty, tz, roll, pitch, yaw, current frame to last frame
+    Eigen::Matrix3d r_w_curr_; // rotation of current lidar frame to world frame
+    Eigen::Vector3d t_w_curr_; // translation of current lidar frame to world frame
 
-    std::vector<int> pointSearchSurfInd1;
-    std::vector<int> pointSearchSurfInd2;
-    std::vector<int> pointSearchSurfInd3;
+    Eigen::Quaterniond q_last_curr_; // rotation of current lidar frame to last lidar frame
+    Eigen::Vector3d t_last_curr_; // translation of current lidar frame to last lidar frame
 
-    std::array<float, 6> transform_from_prev_laser_frame_ = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
-    std::array<float, 6> transform_from_first_laser_frame_ = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
+    // Eigen::Map<Eigen::Vector3d> t_last_curr_(pose_params_ + 3);
+    // Eigen::Map<Eigen::Quaterniond> q_last_curr_(pose_params_);
 
-    nav_msgs::Odometry laser_odometry_;
 
-    tf::TransformBroadcaster tf_broadcaster_;
-    tf::StampedTransform laser_odometry_trans_;
-
-    bool is_degenerate_ = false;
-    cv::Mat mat_p_;
+    nav_msgs::Odometry laser_odom_;
+    tf::TransformBroadcaster tf_broad_;
 };
 
 #endif  // LEGO_FEATURE_ASSOCIATION_H_

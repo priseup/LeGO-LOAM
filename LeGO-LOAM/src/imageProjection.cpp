@@ -1,11 +1,22 @@
-#include <iterator>
+#include <pcl_conversions/pcl_conversions.h>
+#include <limits>
 #include "utility.h"
 #include "lego_math.h"
 #include "imageProjection.h"
 
+const float sensorMinimumRange = 1.0;
+const float sensorMountAngle = 0.0;
+const float segmentTheta = 60.0/180.0*M_PI; // decrese this value may improve accuracy
+const int segmentValidPointNum = 5;
+const int segmentValidLineNum = 3;
+const float segmentAlphaX = laser_resolution_horizon / 180.0 * M_PI;
+const float segmentAlphaY = laser_resolution_vertical / 180.0 * M_PI;
+
 static int index_in_project_cloud(int row, int col) {
     return row * Horizon_SCAN + col;
 }
+
+static int file_idx_ = 0;
 
 ImageProjection::ImageProjection(): nh_("~") {
     sub_laser_cloud_ = nh_.subscribe<sensor_msgs::PointCloud2>(pointCloudTopic, 1, &ImageProjection::cloud_handler, this);
@@ -29,13 +40,15 @@ ImageProjection::ImageProjection(): nh_("~") {
     neighbors_[2] = std::make_pair(0, 1);
     neighbors_[3] = std::make_pair(0, -1);
 
+    projected_cloud_range_.resize(N_SCAN, Horizon_SCAN);
+    point_label_.assign(points_num, PointLabel::invalid);
+    point_cluster_id_.resize(points_num, -1);
+
     allocate_memory();
     reset_parameters();
 }
 
 void ImageProjection::allocate_memory() {
-    const int points_num = N_SCAN*Horizon_SCAN;
-
     laser_cloud_input_.reset(new pcl::PointCloud<Point>);
 
     projected_laser_cloud_.reset(new pcl::PointCloud<Point>);
@@ -48,29 +61,28 @@ void ImageProjection::allocate_memory() {
     projected_ground_segment_cloud_.reset(new pcl::PointCloud<Point>);
     projected_pure_segmented_cloud_.reset(new pcl::PointCloud<Point>);
     projected_outlier_cloud_.reset(new pcl::PointCloud<Point>);
-
 }
 
 void ImageProjection::reset_parameters() {
-    const int points_num = N_SCAN*Horizon_SCAN;
-
     laser_cloud_input_->clear();
     projected_pure_ground_cloud_->clear();
     projected_pure_segmented_cloud_->clear();
     projected_ground_segment_cloud_->clear();
     projected_outlier_cloud_->clear();
 
-    projected_cloud_range_ = cv::Mat(N_SCAN, Horizon_SCAN, CV_32F, cv::Scalar::all(FLT_MAX));
+    projected_cloud_range_.setConstant(FLT_MAX);  // uesless in my code, uesfull in original Lego
 
+//---------assign should be in constructor function----------------------------
     segmented_cloud_msg_.ring_index_start.assign(N_SCAN, 0);
     segmented_cloud_msg_.ring_index_end.assign(N_SCAN, 0);
 
     segmented_cloud_msg_.ground_segment_flag.assign(points_num, false);
     segmented_cloud_msg_.ground_segment_cloud_column.assign(points_num, 0);
     segmented_cloud_msg_.ground_segment_cloud_range.assign(points_num, 0);
+//--------std::fill constant values should be used here-----------------------------
 
-    point_label_.assign(points_num, PointLabel::invalid);
-    point_cluster_id_.resize(points_num, -1);
+    std::fill(point_label_.begin(), point_label_.end(), PointLabel::invalid);
+    std::fill(point_cluster_id_.begin(), point_cluster_id_.end(),  -1);
 
     std::fill(projected_laser_cloud_->points.begin(), projected_laser_cloud_->points.end(), init_point_value_);
     std::fill(projected_cloud_with_range_->points.begin(), projected_cloud_with_range_->points.end(), init_point_value_);
@@ -179,7 +191,7 @@ void ImageProjection::project_point_cloud() {
         if (range < sensorMinimumRange) {
             continue;
         }
-        projected_cloud_range_.at<float>(row, column) = range;
+        projected_cloud_range_(row, column) = range;
 
         int index = index_in_project_cloud(row, column);
         point_label_[index] = PointLabel::valid;
@@ -192,13 +204,12 @@ void ImageProjection::project_point_cloud() {
         projected_cloud_with_range_->points[index] = point;
         projected_cloud_with_range_->points[index].intensity = range;
     }
-    // pcl::io::savePCDFileASCII(fmt::format("/home/pqf/my_lego/{}_project.pcd", file_idx_), *projected_laser_cloud_);
+    // if (projected_laser_cloud_->size())
+      // pcl::io::savePCDFileASCII(fmt::format("/home/pqf/my_lego/{}_project.pcd", file_idx_), *projected_laser_cloud_);
 }
 
 // mark point_label_ from valid to ground
 void ImageProjection::extract_ground() {
-  // static int size = 0;
-  // std::set<int> ground_idx;
     for (int i = 0; i < groundScanInd; ++i) {
         for (int j = 0; j < Horizon_SCAN; ++j) {
             int current_idx = index_in_project_cloud(i, j);
@@ -222,6 +233,7 @@ void ImageProjection::extract_ground() {
         }
     }
     if (pub_pure_ground_cloud_.getNumSubscribers() > 0) {
+    // if (pub_pure_ground_cloud_.getNumSubscribers() == 0) {
         for (int i = 0; i <= groundScanInd; ++i) {
             for (int j = 0; j < Horizon_SCAN; ++j) {
                 int idx = index_in_project_cloud(i, j);
@@ -230,7 +242,8 @@ void ImageProjection::extract_ground() {
             }
         }
     }
-    // pcl::io::savePCDFileASCII(fmt::format("/home/pqf/my_lego/{}_ground.pcd", file_idx_), *projected_pure_ground_cloud_);
+    // if (projected_pure_ground_cloud_->size())
+      // pcl::io::savePCDFileASCII(fmt::format("/home/pqf/my_lego/{}_ground.pcd", file_idx_), *projected_pure_ground_cloud_);
 }
 
 // mark point_label_ from valid to segmentation and outlier
@@ -296,7 +309,7 @@ void ImageProjection::extract_segmentation() {
                 // mark the points' column index for marking occlusion later
                 segmented_cloud_msg_.ground_segment_cloud_column[point_idx] = j;
                 // save range info
-                segmented_cloud_msg_.ground_segment_cloud_range[point_idx] = projected_cloud_range_.at<float>(i,j);
+                segmented_cloud_msg_.ground_segment_cloud_range[point_idx] = projected_cloud_range_(i,j);
 
                 projected_ground_segment_cloud_->push_back(projected_laser_cloud_->points[idx]);
             }
@@ -342,8 +355,8 @@ void ImageProjection::bfs_cluster(int row, int col) {
                   continue;
               }
 
-            auto &&distance = std::minmax(projected_cloud_range_.at<float>(current_row, current_col), 
-                            projected_cloud_range_.at<float>(neibor_row, neibor_col));
+            auto &&distance = std::minmax(projected_cloud_range_(current_row, current_col), 
+                                          projected_cloud_range_(neibor_row, neibor_col));
 
             float alpha = 0.f;
             if (n.first == 0) // row
@@ -378,6 +391,8 @@ void ImageProjection::bfs_cluster(int row, int col) {
     else { // segment is invalid, mark these points as outlier
         for (int i = queue.end; i >= 0; --i) {
             int idx = index_in_project_cloud(queue.elements[i].row, queue.elements[i].col);
+            if (point_label_[idx] == PointLabel::invalid)
+              continue;
             point_label_[idx] = PointLabel::outlier;
             point_cluster_id_[idx] = -1;
         }
@@ -391,47 +406,41 @@ void ImageProjection::publish_cloud() {
 
     sensor_msgs::PointCloud2 laser_cloud_temp;
 
-    // projected outlier cloud with ground
+    // projected outlier cloud without ground
     pcl::toROSMsg(*projected_outlier_cloud_, laser_cloud_temp);
-    laser_cloud_temp.header.stamp = cloud_header_.stamp;
-    laser_cloud_temp.header.frame_id = "base_link";
+    laser_cloud_temp.header = cloud_header_;
     pub_outlier_cloud_.publish(laser_cloud_temp);
 
     // segmented cloud with sparse ground
     pcl::toROSMsg(*projected_ground_segment_cloud_, laser_cloud_temp);
-    laser_cloud_temp.header.stamp = cloud_header_.stamp;
-    laser_cloud_temp.header.frame_id = "base_link";
+    laser_cloud_temp.header = cloud_header_;
     pub_ground_segment_cloud_.publish(laser_cloud_temp);
 
     // projected full cloud
     if (pub_projected_cloud_.getNumSubscribers() > 0) {
         pcl::toROSMsg(*projected_laser_cloud_, laser_cloud_temp);
-        laser_cloud_temp.header.stamp = cloud_header_.stamp;
-        laser_cloud_temp.header.frame_id = "base_link";
+        laser_cloud_temp.header = cloud_header_;
         pub_projected_cloud_.publish(laser_cloud_temp);
     }
 
     // pure dense ground cloud
     if (pub_pure_ground_cloud_.getNumSubscribers() > 0) {
         pcl::toROSMsg(*projected_pure_ground_cloud_, laser_cloud_temp);
-        laser_cloud_temp.header.stamp = cloud_header_.stamp;
-        laser_cloud_temp.header.frame_id = "base_link";
+        laser_cloud_temp.header = cloud_header_;
         pub_pure_ground_cloud_.publish(laser_cloud_temp);
     }
 
     // segmented cloud without ground
     if (pub_pure_segmented_cloud_.getNumSubscribers() > 0) {
         pcl::toROSMsg(*projected_pure_segmented_cloud_, laser_cloud_temp);
-        laser_cloud_temp.header.stamp = cloud_header_.stamp;
-        laser_cloud_temp.header.frame_id = "base_link";
+        laser_cloud_temp.header = cloud_header_;
         pub_pure_segmented_cloud_.publish(laser_cloud_temp);
     }
 
     // projected full cloud with range as intensity
     if (pub_projected_cloud_with_range_.getNumSubscribers() > 0) {
         pcl::toROSMsg(*projected_cloud_with_range_, laser_cloud_temp);
-        laser_cloud_temp.header.stamp = cloud_header_.stamp;
-        laser_cloud_temp.header.frame_id = "base_link";
+        laser_cloud_temp.header = cloud_header_;
         pub_projected_cloud_with_range_.publish(laser_cloud_temp);
     }
 }
